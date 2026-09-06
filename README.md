@@ -138,14 +138,23 @@ escalation tier for the low-confidence remainder (see
 
 ```bash
 %LOCALAPPDATA%\Ollama\ollama.exe serve          # FIRST — leave running
-%LOCALAPPDATA%\Ollama\ollama.exe pull qwen2.5:3b-instruct
+%LOCALAPPDATA%\Ollama\ollama.exe pull qwen2.5:3b
 .venv/bin/python run.py
 ```
 
-`llm.py` caches the Ollama availability check at startup, so the header
-badge only flips to `AI · hybrid router` if Ollama was already serving when
-MAWOS booted; otherwise it says `AI · lexicon only` and the system still
-answers everything, including the queries it would normally escalate.
+For the local deployment, copy the Ollama entries from `.env.example` into
+your ignored `.env`: `MAWOS_OLLAMA_HOST=http://127.0.0.1:11434`,
+`MAWOS_OLLAMA_MODEL=qwen2.5:3b`, `MAWOS_OLLAMA_CONTEXT=2048`, and the bounded
+output/round/concurrency values shown there. `MAWOS_OLLAMA_TIMEOUT` is one
+complete assistant-turn deadline in seconds, covering health and every model
+round; MAWOS does not multiply it. Ollama is checked on demand, never during
+application startup, and a failed check is retried after the configured short
+cooldown.
+
+The configured runtime model is reported separately in API runtime metadata.
+The frozen routing configuration and published research artifacts continue to
+record `qwen2.5:3b-instruct`; they are historical evaluation metadata and are
+not rewritten by local deployment configuration.
 
 If `winget install Ollama.Ollama` downloads and then hangs (it blocks on a
 UAC prompt that never appears in a non-interactive shell — and the partial
@@ -195,6 +204,16 @@ existed.
 
 The lexicon is the **primary** tier — it handles the other ~90% of queries
 unassisted. It is never called a "fallback" in this codebase.
+
+The canonical chat response separates routing policy from outcome:
+`routing.attempted_llm` (also exposed as the compatibility field
+`routing.escalated`) means a request was sent to Ollama;
+`routing.accepted_llm` means the returned answer passed tool and grounding
+validation; and `routing.deterministic_fallback` means the deterministic path
+answered because an intended or attempted LLM route was unavailable or
+rejected. A normal lexicon answer has all three fields false and a null
+`fallback_code`. Explicit requests containing more than one supported chat
+topic are clarified locally before any model or data-tool call.
 
 ```mermaid
 flowchart TD

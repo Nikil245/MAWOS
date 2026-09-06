@@ -58,16 +58,24 @@ class Decision:
     """Why the router did what it did — logged, and shown in the UI."""
 
     def __init__(self, tier: str, margin: float, escalated: bool,
-                 reason: str, fallback_from: str | None = None):
+                 reason: str, fallback_from: str | None = None,
+                 accepted_llm: bool = False):
         self.tier = tier                    # "lexicon" | "llm"
         self.margin = margin
         self.escalated = escalated
         self.reason = reason
         self.fallback_from = fallback_from  # set when escalation failed
+        # `escalated` remains the compatibility field for an actual model
+        # attempt. Acceptance is recorded only after the grounded answer gate.
+        self.accepted_llm = accepted_llm
 
     def as_dict(self) -> dict:
         return {"tier": self.tier, "margin": self.margin,
                 "tau": TAU, "escalated": self.escalated,
+                "attempted_llm": self.escalated,
+                "accepted_llm": self.accepted_llm,
+                "deterministic_fallback": (
+                    self.tier == "lexicon" and self.fallback_from == "llm"),
                 "reason": self.reason, "fallback_from": self.fallback_from}
 
 
@@ -91,7 +99,23 @@ def decide(query: str) -> tuple[llm.IntentResult, Decision]:
     if not should_escalate(r.margin):
         return r, Decision("lexicon", r.margin, False,
                            f"margin {r.margin:.2f} > tau {TAU:.2f}")
-    if not llm.check_ollama():
+    # Legacy synchronous callers never probe the network. Deployment uses
+    # `decide_async`, whose health check is bounded and non-blocking.
+    if not llm.runtime_status()["available"]:
+        return r, Decision("lexicon", r.margin, False,
+                           "escalation warranted but no LLM available",
+                           fallback_from="llm")
+    return r, Decision("llm", r.margin, True,
+                       f"margin {r.margin:.2f} <= tau {TAU:.2f}")
+
+
+async def decide_async(query: str, budget: llm.RequestBudget) -> tuple[llm.IntentResult, Decision]:
+    """Async deployment route; health probing never blocks the FastAPI loop."""
+    r = llm.classify_keyword(query)
+    if not should_escalate(r.margin):
+        return r, Decision("lexicon", r.margin, False,
+                           f"margin {r.margin:.2f} > tau {TAU:.2f}")
+    if not await llm.check_ollama_async(budget):
         return r, Decision("lexicon", r.margin, False,
                            "escalation warranted but no LLM available",
                            fallback_from="llm")
@@ -130,7 +154,10 @@ class Stats:
                 "escalation_rate": rate,
                 "escalation_rate_dev": _CFG["dev_escalation_rate"],
                 "escalation_failed": self.escalation_failed,
+                # `model` is frozen evaluation metadata. Runtime deployment
+                # configuration is reported separately and never changes it.
                 "tau": TAU, "model": _CFG["model"],
+                "runtime_model": llm.config.OLLAMA_MODEL,
                 "uptime_s": round(time.time() - self._started, 1)}
 
 

@@ -55,9 +55,10 @@ async def lifespan(app: FastAPI):
                       f"{result['solve_ms']} ms")
         finally:
             db.close()
-    mode = (f"hybrid router, tau {hybrid_router.TAU:.2f}, escalating to "
-            f"{config.OLLAMA_MODEL}") if llm.check_ollama() else \
-        "lexicon only (install Ollama + qwen2.5 to enable escalation)"
+    # Ollama is optional and is checked only for a low-confidence chat turn;
+    # application startup must never block on or depend on it.
+    mode = (f"hybrid router, tau {hybrid_router.TAU:.2f}, local runtime model "
+            f"{config.OLLAMA_MODEL} checked on demand")
     print(f"[MAWOS] {len(agents)} agents online · AI mode: {mode}")
     task = asyncio.create_task(_proactive_loop(agents))
     yield

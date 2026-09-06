@@ -56,7 +56,8 @@ class EligibilityAgent(BaseAgent):
             "_hop": payload.get("_hop", 1), "results": scholarship_results})
 
     # ---------- hall-ticket eligibility -----------------------------------
-    def evaluate_hall_ticket(self, db, usn: str) -> dict:
+    def hall_ticket_status(self, db, usn: str) -> dict:
+        """Calculate hall-ticket eligibility without changing stored state."""
         student = db.get(Student, usn)
         if student is None:
             return {"usn": usn, "eligible": False, "reasons": ["unknown student"]}
@@ -70,14 +71,23 @@ class EligibilityAgent(BaseAgent):
         eligible = not reasons
         if eligible:
             reasons.append(f"attendance {attendance}% ok; fees cleared")
+        return {"usn": usn, "eligible": eligible, "reasons": reasons}
+
+    def evaluate_hall_ticket(self, db, usn: str) -> dict:
+        """Calculate and persist eligibility for explicit workflow updates."""
+        result = self.hall_ticket_status(db, usn)
+        student = db.get(Student, usn)
+        if student is None:
+            return result
         ticket = db.query(HallTicket).filter_by(usn=usn,
                                                 semester=student.semester).first()
         if ticket is None:
-            ticket = HallTicket(usn=usn, semester=student.semester, eligible=eligible)
+            ticket = HallTicket(usn=usn, semester=student.semester,
+                                eligible=result["eligible"])
             db.add(ticket)
-        ticket.eligible = eligible
-        ticket.reasons = "; ".join(reasons)
-        return {"usn": usn, "eligible": eligible, "reasons": reasons}
+        ticket.eligible = result["eligible"]
+        ticket.reasons = "; ".join(result["reasons"])
+        return result
 
     def schedule_for(self, db, dept_code: str, semester: int) -> list[dict]:
         rows = (db.query(ExamSchedule)

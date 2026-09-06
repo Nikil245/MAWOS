@@ -117,5 +117,6 @@ class NotificationAgent(BaseAgent):
         if conds:
             q = q.filter(or_(*conds))
         return [{"id": n.id, "title": n.title, "message": n.message,
-                 "at": str(n.created_at), "read": n.read}
+                 "source_agent": n.source_agent, "at": n.created_at,
+                 "read": n.read}
                 for n in q.limit(limit).all()]

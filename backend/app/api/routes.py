@@ -1,15 +1,17 @@
 """REST API v2 — role-scoped gateway in front of the agent layer."""
 import datetime as dt
 import math
+from typing import Literal
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from .. import llm, metrics
 from ..agents import get_agents
+from ..agents import tools as assistant_tools
 from ..auth import create_token, get_current_user, require_role, verify_password
 from ..database import get_session
 from ..models import (Department, HallTicket, ScholarshipAssessment, Student,
@@ -19,8 +21,12 @@ from .schemas import (
     AdminAdmissionsResponse,
     AdmissionApplicationResponse,
     AdmissionsFunnelResponse,
+    AssistantCapabilitiesResponse,
+    ChatResponse,
+    ChatTopic,
     DepartmentAnalyticsResponse,
     FeeCollectionResponse,
+    NotificationListResponse,
     PlacementStatsResponse,
     PrincipalAnalyticsResponse,
 )
@@ -43,26 +49,86 @@ def login(body: LoginRequest, db: Session = Depends(get_session)):
             "user": {"username": user.username, "role": user.role,
                      "name": user.display_name, "usn": user.usn,
                      "dept": user.dept_code},
-            "ai_mode": "llm" if llm.check_ollama() else "lexicon"}
+            # Login never probes Ollama: startup/login stay independent of a
+            # local optional service. Chat checks it only when escalation is
+            # warranted.
+            "ai_mode": "llm" if llm.runtime_status()["available"] else "lexicon",
+            "runtime_model": llm.runtime_status()["runtime_model"]}
 
 
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
     return {"username": user.username, "role": user.role,
             "name": user.display_name, "usn": user.usn, "dept": user.dept_code,
-            "ai_mode": "llm" if llm.check_ollama() else "lexicon"}
+            "ai_mode": "llm" if llm.runtime_status()["available"] else "lexicon",
+            "runtime_model": llm.runtime_status()["runtime_model"]}
+
+
+# ---------- notifications ----------------------------------------------------
+@router.get("/notifications", response_model=NotificationListResponse)
+def notifications(user: User = Depends(get_current_user),
+                  db: Session = Depends(get_session)):
+    """Return only notifications addressed to the authenticated database user."""
+    items = get_agents()["notification_agent"].for_user(
+        db, usn=user.usn, role=user.role, dept=user.dept_code)
+    return NotificationListResponse(
+        notifications=items,
+        unread_count=sum(1 for item in items if not item["read"]),
+    )
 
 
 # ---------- assistant ---------------------------------------------------------
+@router.get("/assistant/capabilities", response_model=AssistantCapabilitiesResponse)
+def assistant_capabilities(user: User = Depends(get_current_user)):
+    return assistant_tools.assistant_capabilities(user.role, user.display_name)
+
+
+class GeneralContextMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def content_is_bounded(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > 700:
+            raise ValueError("context content must contain 1 to 700 characters")
+        return value
+
+
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     message: str
+    context_topic: ChatTopic | None = None
+    general_context: list[GeneralContextMessage] = Field(default_factory=list, max_length=6)
+
+    @field_validator("message")
+    @classmethod
+    def chat_message_is_present_and_bounded(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("message must not be empty")
+        if len(value) > 1000:
+            raise ValueError("message must be at most 1000 characters")
+        return value
+
+    @field_validator("general_context")
+    @classmethod
+    def context_total_is_bounded(cls, value: list[GeneralContextMessage]):
+        if sum(len(item.content) for item in value) > 3000:
+            raise ValueError("general context must be at most 3000 characters")
+        return value
 
 
-@router.post("/chat")
+@router.post("/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, user: User = Depends(get_current_user),
                db: Session = Depends(get_session)):
     return await get_agents()["orchestrator_agent"].handle_chat(
-        db, user, body.message)
+        db, user, body.message, context_topic=body.context_topic,
+        general_context=[item.model_dump() for item in body.general_context])
 
 
 # ---------- student portal ------------------------------------------------------
@@ -469,7 +535,8 @@ def departments(user: User = Depends(get_current_user),
 def list_agents(user: User = Depends(get_current_user)):
     return {"agents": [{"name": a.name, "description": a.description}
                        for a in get_agents().values()],
-            "ai_mode": "llm" if llm.check_ollama() else "lexicon"}
+            "ai_mode": "llm" if llm.runtime_status()["available"] else "lexicon",
+            "runtime": llm.runtime_status()}
 
 
 @router.get("/metrics/summary")

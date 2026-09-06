@@ -3,22 +3,41 @@ let onUnauthorized = null;
 export function setUnauthorizedHandler(handler) { onUnauthorized = handler; }
 
 export class ApiError extends Error {
-  constructor(message, status) { super(message); this.status = status; }
+  constructor(message, status, category = 'request') {
+    super(message); this.status = status; this.category = category;
+  }
+}
+
+export function isAbortError(error) {
+  return error?.name === 'AbortError';
+}
+
+function errorCategory(status) {
+  if (status === 401) return 'authentication';
+  if (status === 403) return 'authorization';
+  if (status >= 500) return 'server';
+  return 'request';
 }
 
 export async function request(path, { method, body, token, signal } = {}) {
-  const response = await fetch(`${API_ROOT}${path}`, {
-    method: method || (body ? 'POST' : 'GET'), signal,
-    headers: {
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let response;
+  try {
+    response = await fetch(`${API_ROOT}${path}`, {
+      method: method || (body ? 'POST' : 'GET'), signal,
+      headers: {
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    throw new ApiError('Network request failed', 0, 'network');
+  }
   if (!response.ok) {
     let message = response.statusText;
     try { message = (await response.json()).detail || message; } catch { /* non JSON error */ }
-    const error = new ApiError(message, response.status);
+    const error = new ApiError(message, response.status, errorCategory(response.status));
     if (error.status === 401) onUnauthorized?.();
     throw error;
   }
@@ -29,6 +48,7 @@ export async function request(path, { method, body, token, signal } = {}) {
 export const api = {
   login: (username, password) => request('/auth/login', { body: { username, password } }),
   me: (token) => request('/me', { token }),
+  notifications: (token, signal) => request('/notifications', { token, signal }),
   studentDashboard: (token) => request('/student/dashboard', { token }),
   payFee: (token, fee_id) => request('/student/pay-fee', { token, body: { fee_id } }),
   facultyOverview: (token) => request('/faculty/overview', { token }),
@@ -42,7 +62,10 @@ export const api = {
   principalAnalytics: (token) => request('/principal/analytics', { token }),
   admissions: (token) => request('/admin/admissions', { token }),
   adminAction: (token, path, body) => request(path, { token, body, method: 'POST' }),
-  chat: (token, message) => request('/chat', { token, body: { message } }),
+  assistantCapabilities: (token, signal) => request('/assistant/capabilities', { token, signal }),
+  chat: (token, message, signal, contextTopic = null, generalContext = []) => request('/chat', {
+    token, body: { message, context_topic: contextTopic, general_context: generalContext }, signal,
+  }),
   metrics: (token) => request('/metrics/summary', { token }),
   agents: (token) => request('/agents', { token }),
   workflows: (token) => request('/workflows/recent', { token }),

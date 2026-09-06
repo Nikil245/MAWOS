@@ -3,7 +3,7 @@ aggregations that power the role dashboards."""
 from sqlalchemy import case, func
 
 from ..models import (
-    AttendanceSummary, Department, MarksRecord, Student, Subject,
+    AttendanceSummary, Department, Faculty, MarksRecord, Student, Subject,
     TeachingAssignment,
 )
 from ..marks_policy import INTERNALS, MAX_MARKS
@@ -26,11 +26,13 @@ class AcademicAgent(BaseAgent):
                 "cgpa": s.cgpa, "backlogs": s.backlogs, "category": s.category,
                 "admission_year": s.admission_year}
 
-    def student_marks(self, db, usn: str) -> list[dict]:
-        rows = (db.query(MarksRecord, Subject)
-                  .join(Subject, Subject.code == MarksRecord.subject_code)
-                  .filter(MarksRecord.usn == usn)
-                  .order_by(MarksRecord.subject_code, MarksRecord.internal).all())
+    def student_marks(self, db, usn: str, subject_code: str | None = None) -> list[dict]:
+        query = (db.query(MarksRecord, Subject)
+                   .join(Subject, Subject.code == MarksRecord.subject_code)
+                   .filter(MarksRecord.usn == usn))
+        if subject_code:
+            query = query.filter(MarksRecord.subject_code == subject_code)
+        rows = query.order_by(MarksRecord.subject_code, MarksRecord.internal).all()
         by_subject: dict[str, dict] = {}
         for m, sub in rows:
             e = by_subject.setdefault(m.subject_code, {
@@ -126,6 +128,18 @@ class AcademicAgent(BaseAgent):
                 "avg_attendance": round(float(avg_att), 1),
                 "avg_cgpa": round(float(avg_cgpa), 2),
                 "by_year": {int(k): v for k, v in by_year.items()}}
+
+    def department_summary(self, db, dept: str) -> dict:
+        """Dashboard-consistent counts of all currently stored department rows."""
+        department = db.get(Department, dept)
+        return {
+            "department_code": dept,
+            "department_name": department.name if department else dept,
+            "student_count": int(db.query(func.count(func.distinct(Student.usn)))
+                                 .filter(Student.dept_code == dept).scalar() or 0),
+            "faculty_count": int(db.query(func.count(func.distinct(Faculty.id)))
+                                 .filter(Faculty.dept_code == dept).scalar() or 0),
+        }
 
     def institution_analytics(self, db) -> dict:
         return {d.code: self.dept_analytics(db, d.code)

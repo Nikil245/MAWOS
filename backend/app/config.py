@@ -57,6 +57,32 @@ def _boolean_setting(name: str, default: bool = False) -> bool:
     raise ConfigurationError(f"{name} must be true or false")
 
 
+def _positive_int_setting(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ConfigurationError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ConfigurationError(f"{name} must be a positive integer")
+    return value
+
+
+def _positive_float_setting(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ConfigurationError(f"{name} must be a positive number") from exc
+    if value <= 0:
+        raise ConfigurationError(f"{name} must be a positive number")
+    return value
+
+
 def _has_strong_secret_shape(secret: str) -> bool:
     """Reject obvious low-entropy values; operators must use random secrets."""
     return len(set(secret)) >= 16
@@ -159,9 +185,20 @@ JWT_EXPIRY_HOURS = 12
 
 # Local LLM (optional). The system is fully functional without it —
 # the deterministic keyword classifier handles intent routing.
-OLLAMA_HOST = os.getenv("MAWOS_OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("MAWOS_OLLAMA_MODEL", "qwen2.5:3b-instruct")
-OLLAMA_TIMEOUT_S = float(os.getenv("MAWOS_OLLAMA_TIMEOUT", "8.0"))
+OLLAMA_HOST = os.getenv("MAWOS_OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+# Runtime default for the local deployment.  The frozen research model remains
+# recorded in router_config.json and evaluation artifacts; it is not changed.
+OLLAMA_MODEL = os.getenv("MAWOS_OLLAMA_MODEL", "qwen2.5:3b")
+# One complete assistant-turn budget, including availability checks and every
+# model round.  There is intentionally no hidden multiplier in the client.
+OLLAMA_TIMEOUT_S = _positive_float_setting("MAWOS_OLLAMA_TIMEOUT", 20.0)
+OLLAMA_CONTEXT_TOKENS = _positive_int_setting("MAWOS_OLLAMA_CONTEXT", 2048)
+OLLAMA_MAX_OUTPUT_TOKENS = _positive_int_setting("MAWOS_OLLAMA_MAX_OUTPUT_TOKENS", 192)
+OLLAMA_MAX_RESPONSE_CHARS = _positive_int_setting("MAWOS_OLLAMA_MAX_RESPONSE_CHARS", 12000)
+OLLAMA_MAX_ROUNDS = _positive_int_setting("MAWOS_OLLAMA_MAX_ROUNDS", 2)
+OLLAMA_CONCURRENCY = _positive_int_setting("MAWOS_OLLAMA_CONCURRENCY", 1)
+OLLAMA_HEALTH_TTL_S = _positive_float_setting("MAWOS_OLLAMA_HEALTH_TTL", 5.0)
+OLLAMA_RETRY_COOLDOWN_S = _positive_float_setting("MAWOS_OLLAMA_RETRY_COOLDOWN", 2.0)
 
 # P3 — PCN-style provenance gate on the LLM tier's free-text answers
 # (backend/app/provenance.py, docs/RESEARCH_PLAN_V3.md §3.2). On by

@@ -1,5 +1,101 @@
-"""Explicit response contracts for the Principal and Admin dashboards."""
+"""Explicit response contracts for MAWOS API surfaces."""
+import datetime as dt
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
+
+
+ChatTopic = Literal[
+    "attendance", "fees", "marks", "eligibility", "greeting", "thanks", "identity",
+    "help", "attendance_meaning", "attendance_requirement", "cie",
+    "eligibility_meaning", "fees_meaning", "improve_attendance", "mawos", "reason_codes",
+    "profile", "rag",
+]
+ChatCategory = Literal[
+    "personal_record", "conversation", "institutional_faq", "clarification",
+    "unsupported", "sensitive_or_disallowed", "general_ai", "department_record",
+]
+ChatSource = Literal[
+    "Deterministic answer", "AI-grounded record answer", "General AI response",
+    "Official MAWOS information", "Safe fallback", "Clarification",
+]
+
+
+class NotificationItemResponse(BaseModel):
+    id: int
+    title: str
+    message: str
+    source_agent: str
+    at: dt.datetime
+    read: bool
+
+
+class NotificationListResponse(BaseModel):
+    notifications: list[NotificationItemResponse] = Field(default_factory=list)
+    unread_count: int = 0
+
+
+class ChatRoutingResponse(BaseModel):
+    """Routing outcome; ``escalated`` is the legacy attempted-LLM flag."""
+    tier: Literal["lexicon", "llm", "scope"]
+    margin: float
+    tau: float
+    escalated: bool
+    attempted_llm: bool = False
+    accepted_llm: bool = False
+    deterministic_fallback: bool = False
+    reason: str
+    fallback_from: str | None = None
+
+
+class ChatToolUseResponse(BaseModel):
+    name: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    ms: float = 0.0
+
+
+class ChatResponse(BaseModel):
+    """Canonical read-only assistant result returned by ``POST /api/chat``."""
+    text: str
+    category: ChatCategory
+    source_label: ChatSource
+    context_topic: ChatTopic | None = None
+    knowledge_sources: list[str] = Field(default_factory=list)
+    mode: Literal["lexicon", "llm", "scope", "general_ai"]
+    routing: ChatRoutingResponse
+    tools_used: list[ChatToolUseResponse] = Field(default_factory=list)
+    intent: str | None = None
+    model: str | None = None
+    latency_ms: float = 0.0
+    fallback: bool = False
+    fallback_code: str | None = None
+    provenance: dict[str, Any] | None = None
+    # Retained for compatibility with existing lexicon callers. It is always
+    # the same authorized, read-only result used to produce ``text``.
+    data: dict[str, Any] | None = None
+
+
+class AssistantRecordCapabilityResponse(BaseModel):
+    category: str
+    scope: str
+
+
+class AssistantSuggestionGroupResponse(BaseModel):
+    label: str
+    prompts: list[str] = Field(default_factory=list)
+
+
+class AssistantCapabilitiesResponse(BaseModel):
+    """Display-safe assistant scope derived from backend authorization."""
+    role: Literal["student", "faculty", "hod", "principal", "admin"]
+    title: str
+    subtitle: str
+    description: str
+    greeting: str
+    help: str
+    input_placeholder: str
+    record_capabilities: list[AssistantRecordCapabilityResponse] = Field(default_factory=list)
+    suggestion_groups: list[AssistantSuggestionGroupResponse] = Field(default_factory=list)
 
 
 class DepartmentAnalyticsResponse(BaseModel):
