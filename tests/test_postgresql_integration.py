@@ -10,7 +10,6 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -18,15 +17,23 @@ from backend.app.auth import create_token, hash_password
 from backend.app.database import Base, get_session
 from backend.app.main import app
 from backend.app.models import FeeRecord, User
+from backend.app.postgresql_safety import (
+    PostgreSQLSafetyError,
+    isolated_test_database_url,
+    require_test_database_name,
+)
 
 
 def _postgres_test_url() -> str:
-    url = os.getenv("MAWOS_POSTGRES_TEST_URL")
-    if not url:
+    if not os.getenv("MAWOS_POSTGRES_TEST_URL"):
         pytest.skip("MAWOS_POSTGRES_TEST_URL is not configured; PostgreSQL tests stay disabled")
-    if make_url(url).drivername != "postgresql+psycopg":
-        pytest.fail("MAWOS_POSTGRES_TEST_URL must use postgresql+psycopg")
-    return url
+    try:
+        return isolated_test_database_url(
+            os.getenv("MAWOS_LIVE_DATABASE_URL_FOR_TEST_GUARD"),
+            os.getenv("MAWOS_POSTGRES_TEST_URL"),
+        ).render_as_string(hide_password=False)
+    except PostgreSQLSafetyError as exc:
+        pytest.fail(str(exc))
 
 
 @pytest.fixture(scope="module")
@@ -35,8 +42,10 @@ def postgres_engine():
     try:
         with engine.connect() as connection:
             database = connection.execute(text("SELECT current_database()")).scalar_one()
-            if database != "mawos_test":
-                pytest.fail("PostgreSQL integration tests require database mawos_test")
+            try:
+                require_test_database_name(database)
+            except PostgreSQLSafetyError as exc:
+                pytest.fail(str(exc))
         yield engine
     finally:
         engine.dispose()
@@ -78,6 +87,9 @@ def test_postgresql_session_commit_rollback_and_constraints(postgres_engine):
             session.flush()
         session.rollback()
     finally:
+        with postgres_engine.connect() as connection:
+            database = connection.execute(text("SELECT current_database()")).scalar_one()
+            require_test_database_name(database)
         session.query(User).filter_by(username=username).delete()
         session.commit()
         session.close()
@@ -109,6 +121,9 @@ def test_basic_authenticated_api_query_uses_postgresql_session(postgres_engine):
         assert response.json()["username"] == username
     finally:
         app.dependency_overrides.pop(get_session, None)
+        with postgres_engine.connect() as connection:
+            database = connection.execute(text("SELECT current_database()")).scalar_one()
+            require_test_database_name(database)
         session.query(User).filter_by(username=username).delete()
         session.commit()
         session.close()

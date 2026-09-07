@@ -80,6 +80,7 @@ pnpm-debug.log*
 mawos-before-postgres.db
 *.backup
 *.dump
+backups/
 
 # Temporary files
 *.tmp

@@ -5,6 +5,12 @@ import tempfile
 from pathlib import Path
 
 _tmpdir = tempfile.mkdtemp(prefix="mawos_test_")
+# Retain the supplied live URL only for the PostgreSQL integration guard.  The
+# application itself is always pointed at SQLite during pytest collection, so
+# imports and ordinary tests cannot connect to the populated database.
+_live_database_url = os.environ.get("MAWOS_DATABASE_URL")
+if _live_database_url:
+    os.environ["MAWOS_LIVE_DATABASE_URL_FOR_TEST_GUARD"] = _live_database_url
 os.environ["MAWOS_ENV"] = "test"
 os.environ["MAWOS_JWT_SECRET"] = "mawos-test-secret-0123456789-abcdefghijklmnopqrstuvwxyz"
 os.environ["MAWOS_SEED_DEMO_DATA"] = "false"

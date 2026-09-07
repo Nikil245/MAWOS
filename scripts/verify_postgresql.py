@@ -20,6 +20,9 @@ import backend.app.models  # Register all ORM tables on Base.metadata.
 
 POSTGRESQL_TABLES = sorted(Base.metadata.tables)
 POSTGRESQL_DIALECT = postgresql.dialect()
+# Alembic's version table is infrastructure, not an application model table.
+# It is the sole permitted additional table after baseline stamping.
+ALLOWED_INFRASTRUCTURE_TABLES = frozenset({"alembic_version"})
 
 
 def _normalized_type(type_) -> str:
@@ -124,7 +127,9 @@ def main() -> int:
             live_tables = set(inspector.get_table_names(schema="public"))
             expected_tables = set(POSTGRESQL_TABLES)
             missing = sorted(expected_tables - live_tables)
-            unexpected = sorted(live_tables - expected_tables)
+            unexpected = sorted(
+                live_tables - expected_tables - ALLOWED_INFRASTRUCTURE_TABLES
+            )
             sequences = set(inspector.get_sequence_names(schema="public"))
 
             print(f"database: {database}")
