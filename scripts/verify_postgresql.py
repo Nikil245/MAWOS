@@ -35,6 +35,38 @@ def _sequence_from_default(value: str | None) -> str | None:
     return match.group(1) if match else None
 
 
+def _normalized_server_default(value) -> str | None:
+    """Compare PostgreSQL literal defaults without hiding expression changes.
+
+    PostgreSQL's inspector adds casts and quotes to literal defaults, whereas
+    SQLAlchemy stores the migration's literal.  Normalize only those spelling
+    differences; expressions such as ``now()`` remain expressions.
+    """
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    normalized = re.sub(
+        r"(?:::[A-Za-z_][A-Za-z_0-9]*(?:\s+[A-Za-z_][A-Za-z_0-9]*)*)+$",
+        "",
+        normalized,
+    ).strip()
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] == "'":
+        normalized = normalized[1:-1].replace("''", "'")
+    if normalized.lower() in {"true", "false"}:
+        return normalized.lower()
+    return normalized
+
+
+def _model_server_default(column) -> str | None:
+    if column.server_default is None:
+        return None
+    return _normalized_server_default(column.server_default.arg)
+
+
+def _server_default_difference(column, live_default) -> bool:
+    return _model_server_default(column) != _normalized_server_default(live_default)
+
+
 def _model_foreign_keys(table) -> list[tuple[tuple[str, ...], str, tuple[str, ...]]]:
     return sorted(
         (tuple(element.parent.name for element in constraint.elements),
@@ -69,8 +101,8 @@ def _compare_table(inspector, table_name: str, sequences: set[str]) -> list[str]
                 differences.append(f"{column_name} sequence default")
             if expected_sequence not in sequences:
                 differences.append(f"{column_name} sequence")
-        elif model_column.server_default is None and live_column.get("default") is not None:
-            differences.append(f"{column_name} unexpected server default")
+        elif _server_default_difference(model_column, live_column.get("default")):
+            differences.append(f"{column_name} server default")
 
     live_pk = tuple(inspector.get_pk_constraint(table_name, schema="public").get("constrained_columns") or ())
     if model_pk != live_pk:

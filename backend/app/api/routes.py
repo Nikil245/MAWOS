@@ -1,5 +1,6 @@
 """REST API v2 — role-scoped gateway in front of the agent layer."""
 import datetime as dt
+import logging
 import math
 from typing import Literal
 
@@ -7,6 +8,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .. import llm, metrics
@@ -14,8 +16,10 @@ from ..agents import get_agents
 from ..agents import tools as assistant_tools
 from ..auth import create_token, get_current_user, require_role, verify_password
 from ..database import get_session
-from ..models import (Department, HallTicket, ScholarshipAssessment, Student,
-                      TeachingAssignment, User, Faculty)
+from ..models import (Department, HallTicket, Notification, ScholarshipAssessment, Student,
+                      TeachingAssignment, User, Faculty, Scholarship,
+                      ScholarshipApplication)
+from .. import scholarships
 from ..marks_policy import INTERNALS, MAX_MARKS, assessments
 from .schemas import (
     AdminAdmissionsResponse,
@@ -29,9 +33,13 @@ from .schemas import (
     NotificationListResponse,
     PlacementStatsResponse,
     PrincipalAnalyticsResponse,
+    ScholarshipApplyRequest,
+    ScholarshipRequest,
+    ScholarshipReviewRequest,
 )
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 
 # ---------- auth ------------------------------------------------------------
@@ -75,6 +83,44 @@ def notifications(user: User = Depends(get_current_user),
         notifications=items,
         unread_count=sum(1 for item in items if not item["read"]),
     )
+
+
+def _visible_notification_query(db, user):
+    from sqlalchemy import and_, or_
+    conditions = []
+    if user.usn:
+        conditions.append(Notification.usn == user.usn)
+    if user.role:
+        conditions.append(and_(Notification.audience_role == user.role,
+                               or_(Notification.dept_code.is_(None), Notification.dept_code == user.dept_code)))
+    return db.query(Notification).filter(or_(*conditions)) if conditions else db.query(Notification).filter(False)
+
+
+@router.patch("/notifications/{notification_id}/read")
+def mark_notification_read(notification_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_session)):
+    row = _visible_notification_query(db, user).filter(Notification.id == notification_id).first()
+    if row is None:
+        raise HTTPException(404, "Notification not found")
+    try:
+        row.read = True
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Unable to mark notification read")
+        raise HTTPException(500, "Notification could not be updated.") from exc
+    return {"id": row.id, "read": True}
+
+
+@router.post("/notifications/read-all")
+def mark_all_notifications_read(user: User = Depends(get_current_user), db: Session = Depends(get_session)):
+    try:
+        changed = _visible_notification_query(db, user).filter(Notification.read.is_(False)).update({Notification.read: True}, synchronize_session=False)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Unable to mark notifications read")
+        raise HTTPException(500, "Notifications could not be updated.") from exc
+    return {"updated": changed}
 
 
 # ---------- assistant ---------------------------------------------------------
@@ -141,8 +187,8 @@ def student_dashboard(user: User = Depends(require_role("student")),
     from ..agents.attendance import overall_percentage
     subs = db.query(AttendanceSummary).filter_by(usn=user.usn).all()
     ht = db.query(HallTicket).filter_by(usn=user.usn).first()
-    sch = db.query(ScholarshipAssessment).filter_by(usn=user.usn).first()
     s = db.get(Student, user.usn)
+    workflow_scholarship = scholarships.student_summary(db, s)
     return {
         "profile": profile,
         "attendance": {
@@ -154,8 +200,7 @@ def student_dashboard(user: User = Depends(require_role("student")),
         "fees": agents["finance_agent"].student_fees(db, user.usn),
         "hall_ticket": ({"eligible": ht.eligible, "reasons": ht.reasons}
                         if ht else None),
-        "scholarship": ({"status": sch.status, "ml_score": sch.ml_score,
-                         "reasons": sch.reasons} if sch else None),
+        "scholarship": {**workflow_scholarship, "status": workflow_scholarship["state"]},
         "placements": agents["placement_agent"].student_view(db, user.usn),
         "timetable": agents["timetable_agent"].grid(db, s.dept_code, s.year,
                                                     s.section),
@@ -574,3 +619,168 @@ def workflow_trace(workflow_id: str, user: User = Depends(get_current_user),
         {"topic": e.topic, "agent": e.agent, "hop": e.hop,
          "elapsed_ms": e.elapsed_ms, "at": str(e.created_at)}
         for e in events]}
+
+
+# ---------- scholarship workflow -----------------------------------------------------------
+def _scholarship_write(db, action):
+    try:
+        value = action()
+        db.commit()
+        return value
+    except HTTPException:
+        db.rollback(); raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Scholarship workflow transaction failed")
+        raise HTTPException(500, "Scholarship workflow could not be completed; no changes were saved.") from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Scholarship workflow operation failed")
+        raise HTTPException(500, "Scholarship workflow could not be completed; no changes were saved.") from exc
+
+
+def _faculty_scholarship(db, user, scholarship_id):
+    row = scholarships._not_found(db.get(Scholarship, scholarship_id))
+    scholarships._require(row.created_by_faculty_id == user.faculty_id, "You do not own this scholarship")
+    return row
+
+
+@router.get("/faculty/scholarships")
+def faculty_scholarships(user: User = Depends(require_role("faculty")), db: Session = Depends(get_session)):
+    rows = db.query(Scholarship).filter_by(created_by_faculty_id=user.faculty_id).order_by(Scholarship.updated_at.desc()).all()
+    return {"scholarships": [scholarships.serialize(row) for row in rows]}
+
+
+@router.post("/faculty/scholarships", status_code=201)
+def create_scholarship(body: ScholarshipRequest, user: User = Depends(require_role("faculty")), db: Session = Depends(get_session)):
+    def action():
+        data = body.model_dump(); data["department_code"] = data["department_code"].upper(); scholarships.validate_payload(data)
+        if data["department_code"] != user.dept_code or not db.get(Department, data["department_code"]): raise HTTPException(403, "Faculty may create scholarships only for their department")
+        row = Scholarship(**{**data, "criteria": scholarships._dump(data.pop("criteria")), "created_by_faculty_id": user.faculty_id})
+        db.add(row); db.flush(); scholarships._event(db, "CREATE", row, user.username); return scholarships.serialize(row)
+    return _scholarship_write(db, action)
+
+
+@router.get("/faculty/scholarships/{scholarship_id}")
+def faculty_scholarship(scholarship_id: int, user: User = Depends(require_role("faculty")), db: Session = Depends(get_session)):
+    return scholarships.serialize(_faculty_scholarship(db, user, scholarship_id))
+
+
+@router.put("/faculty/scholarships/{scholarship_id}")
+def update_scholarship(scholarship_id: int, body: ScholarshipRequest, user: User = Depends(require_role("faculty")), db: Session = Depends(get_session)):
+    def action():
+        row = _faculty_scholarship(db, user, scholarship_id)
+        if row.status not in {"DRAFT", "CHANGES_REQUESTED"}: raise HTTPException(409, "Published, pending, rejected, and closed scholarships are immutable")
+        data = body.model_dump(); data["department_code"] = data["department_code"].upper(); scholarships.validate_payload(data)
+        if data["department_code"] != user.dept_code: raise HTTPException(403, "Department cannot be changed outside your scope")
+        for key, value in data.items(): setattr(row, key, scholarships._dump(value) if key == "criteria" else value)
+        if row.status == "CHANGES_REQUESTED": scholarships._transition(row, "DRAFT")
+        row.criteria_version += 1; scholarships._event(db, "EDIT", row, user.username); return scholarships.serialize(row)
+    return _scholarship_write(db, action)
+
+
+@router.delete("/faculty/scholarships/{scholarship_id}", status_code=204)
+def delete_scholarship(scholarship_id: int, user: User = Depends(require_role("faculty")), db: Session = Depends(get_session)):
+    def action():
+        row = _faculty_scholarship(db, user, scholarship_id)
+        if row.status != "DRAFT": raise HTTPException(409, "Only drafts may be deleted")
+        scholarships._event(db, "DELETE", row, user.username); db.delete(row)
+    return _scholarship_write(db, action)
+
+
+@router.post("/faculty/scholarships/{scholarship_id}/submit")
+def submit_scholarship(scholarship_id: int, user: User = Depends(require_role("faculty")), db: Session = Depends(get_session)):
+    def action():
+        row = _faculty_scholarship(db, user, scholarship_id); scholarships._transition(row, "PENDING_APPROVAL"); scholarships._event(db, "SUBMIT", row, user.username); return scholarships.serialize(row)
+    return _scholarship_write(db, action)
+
+
+@router.post("/faculty/scholarships/{scholarship_id}/withdraw")
+def withdraw_scholarship(scholarship_id: int, user: User = Depends(require_role("faculty")), db: Session = Depends(get_session)):
+    def action():
+        row = _faculty_scholarship(db, user, scholarship_id); scholarships._transition(row, "DRAFT"); scholarships._event(db, "WITHDRAW", row, user.username); return scholarships.serialize(row)
+    return _scholarship_write(db, action)
+
+
+def _hod_scholarship(db, user, scholarship_id):
+    row = scholarships._not_found(db.get(Scholarship, scholarship_id)); scholarships._require(row.department_code == user.dept_code, "Scholarship is outside your department"); return row
+
+
+@router.get("/hod/scholarships")
+def hod_scholarships(user: User = Depends(require_role("hod")), db: Session = Depends(get_session)):
+    rows = db.query(Scholarship).filter_by(department_code=user.dept_code).order_by(Scholarship.updated_at.desc()).all()
+    return {"scholarships": [{**scholarships.serialize(row), "impact": scholarships.aggregate(db, row)} for row in rows]}
+
+
+@router.get("/hod/scholarships/{scholarship_id}")
+def hod_scholarship(scholarship_id: int, user: User = Depends(require_role("hod")), db: Session = Depends(get_session)):
+    row = _hod_scholarship(db, user, scholarship_id); return {**scholarships.serialize(row), "impact": scholarships.aggregate(db, row)}
+
+
+@router.post("/hod/scholarships/{scholarship_id}/request-changes")
+def request_changes(scholarship_id: int, body: ScholarshipReviewRequest, user: User = Depends(require_role("hod")), db: Session = Depends(get_session)):
+    if not body.comment.strip(): raise HTTPException(422, "A comment is required when requesting changes")
+    def action():
+        row = _hod_scholarship(db, user, scholarship_id); scholarships._transition(row, "CHANGES_REQUESTED"); row.approval_comment = body.comment.strip(); scholarships._notify(db, "Scholarship changes requested", row.approval_comment, role="faculty", dept=row.department_code); scholarships._event(db, "REQUEST_CHANGES", row, user.username); return scholarships.serialize(row)
+    return _scholarship_write(db, action)
+
+
+@router.post("/hod/scholarships/{scholarship_id}/reject")
+def reject_scholarship(scholarship_id: int, body: ScholarshipReviewRequest, user: User = Depends(require_role("hod")), db: Session = Depends(get_session)):
+    if not body.comment.strip(): raise HTTPException(422, "A rejection reason is required")
+    def action():
+        row = _hod_scholarship(db, user, scholarship_id); scholarships._transition(row, "REJECTED"); row.rejection_reason = body.comment.strip(); scholarships._notify(db, "Scholarship rejected", row.rejection_reason, role="faculty", dept=row.department_code); scholarships._event(db, "REJECT", row, user.username); return scholarships.serialize(row)
+    return _scholarship_write(db, action)
+
+
+@router.post("/hod/scholarships/{scholarship_id}/approve")
+def approve_scholarship(scholarship_id: int, body: ScholarshipReviewRequest, user: User = Depends(require_role("hod")), db: Session = Depends(get_session)):
+    def action():
+        row = _hod_scholarship(db, user, scholarship_id)
+        if "PUBLISHED" not in scholarships.TRANSITIONS.get(row.status, set()):
+            raise HTTPException(409, f"Invalid scholarship transition: {row.status} to PUBLISHED")
+        assessments = scholarships.evaluate_applicable(db, row, publishing=True)
+        for assessment in assessments:
+            if assessment.eligibility_status == "ELIGIBLE": scholarships._notify(db, "Scholarship available", f"You are eligible for {row.name}.", usn=assessment.usn)
+        scholarships._notify(db, "Scholarship published", f"{row.name} was approved and published.", role="faculty", dept=row.department_code)
+        scholarships._event(db, "APPROVE", row, user.username); scholarships._event(db, "PUBLISH", row, user.username)
+        row.status = "PUBLISHED"; row.approved_by_hod_id = user.faculty_id; row.approval_comment = body.comment.strip(); row.published_at = scholarships.utcnow()
+        db.flush()
+        return {**scholarships.serialize(row), "impact": scholarships.aggregate(db, row)}
+    return _scholarship_write(db, action)
+
+
+@router.post("/hod/scholarships/{scholarship_id}/close")
+def close_scholarship(scholarship_id: int, user: User = Depends(require_role("hod")), db: Session = Depends(get_session)):
+    def action():
+        row = _hod_scholarship(db, user, scholarship_id); scholarships._transition(row, "CLOSED"); scholarships._event(db, "CLOSE", row, user.username); return scholarships.serialize(row)
+    return _scholarship_write(db, action)
+
+
+@router.get("/student/scholarships")
+def student_scholarships(user: User = Depends(require_role("student")), db: Session = Depends(get_session)):
+    student = db.get(Student, user.usn); rows = db.query(Scholarship).filter_by(department_code=student.dept_code).filter(Scholarship.status.in_(["PUBLISHED", "CLOSED"])).order_by(Scholarship.closes_at).all()
+    output = []
+    for row in rows:
+        assessment = db.query(ScholarshipAssessment).filter_by(scholarship_id=row.id, usn=user.usn, criteria_version=row.criteria_version).first()
+        application = db.query(ScholarshipApplication).filter_by(scholarship_id=row.id, student_usn=user.usn).first()
+        output.append(scholarships.serialize(row, assessment, application))
+    return {"scholarships": output}
+
+
+@router.get("/student/scholarships/{scholarship_id}")
+def student_scholarship(scholarship_id: int, user: User = Depends(require_role("student")), db: Session = Depends(get_session)):
+    student = db.get(Student, user.usn); row = scholarships._not_found(db.get(Scholarship, scholarship_id)); scholarships._require(row.department_code == student.dept_code and row.status in {"PUBLISHED", "CLOSED"})
+    assessment = db.query(ScholarshipAssessment).filter_by(scholarship_id=row.id, usn=user.usn, criteria_version=row.criteria_version).first(); application = db.query(ScholarshipApplication).filter_by(scholarship_id=row.id, student_usn=user.usn).first(); return scholarships.serialize(row, assessment, application)
+
+
+@router.post("/student/scholarships/{scholarship_id}/apply", status_code=201)
+def apply_scholarship(scholarship_id: int, body: ScholarshipApplyRequest, user: User = Depends(require_role("student")), db: Session = Depends(get_session)):
+    def action():
+        student = db.get(Student, user.usn); row = scholarships._not_found(db.get(Scholarship, scholarship_id)); scholarships._require(row.department_code == student.dept_code and row.status == "PUBLISHED")
+        if not (row.opens_at <= scholarships.utcnow() < row.closes_at): raise HTTPException(409, "Scholarship is not open")
+        assessment = db.query(ScholarshipAssessment).filter_by(scholarship_id=row.id, usn=user.usn, criteria_version=row.criteria_version).first()
+        if not assessment or assessment.eligibility_status != "ELIGIBLE": raise HTTPException(409, "Only eligible students may apply")
+        if db.query(ScholarshipApplication).filter_by(scholarship_id=row.id, student_usn=user.usn).first(): raise HTTPException(409, "Application already exists")
+        application = ScholarshipApplication(scholarship_id=row.id, student_usn=user.usn, external_reference=body.external_reference.strip()); db.add(application); scholarships._event(db, "APPLY", row, user.username); return scholarships.serialize(row, assessment, application)
+    return _scholarship_write(db, action)

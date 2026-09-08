@@ -164,3 +164,36 @@ class AdmissionApplicationResponse(BaseModel):
 class AdminAdmissionsResponse(BaseModel):
     funnel: AdmissionsFunnelResponse = Field(default_factory=AdmissionsFunnelResponse)
     applications: list[AdmissionApplicationResponse] = Field(default_factory=list)
+
+
+class ScholarshipCriteriaRequest(BaseModel):
+    minimum_cgpa: float | None = Field(None, ge=0, le=10)
+    minimum_attendance: float | None = Field(None, ge=0, le=100)
+    maximum_backlogs: int | None = Field(None, ge=0)
+    fee_clearance_required: bool | None = None
+    income_limit: float | None = Field(None, ge=0)
+    allowed_departments: list[str] | None = None
+    allowed_semesters: list[int] | None = None
+    allowed_categories: list[str] | None = None
+    required_documents: list[str] | None = None
+
+
+class ScholarshipRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    provider: str = Field(min_length=2, max_length=160)
+    description: str = Field(default="", max_length=5000)
+    amount: float = Field(ge=0)
+    application_url: str = Field(min_length=8, max_length=512)
+    opens_at: dt.datetime
+    closes_at: dt.datetime
+    department_code: str = Field(min_length=2, max_length=8)
+    official_document_reference: str = Field(default="", max_length=512)
+    criteria: ScholarshipCriteriaRequest = Field(default_factory=ScholarshipCriteriaRequest)
+
+
+class ScholarshipReviewRequest(BaseModel):
+    comment: str = Field(default="", max_length=2000)
+
+
+class ScholarshipApplyRequest(BaseModel):
+    external_reference: str = Field(default="", max_length=256)

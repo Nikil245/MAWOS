@@ -212,6 +212,52 @@ class ScholarshipAssessment(Base):
     ml_score = Column(Float, nullable=True)
     reasons = Column(Text, nullable=False, default="")
     assessed_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    # Legacy rows use ``scheme``. Workflow rows are keyed by a published
+    # scholarship and retain the criteria revision that produced the verdict.
+    scholarship_id = Column(Integer, ForeignKey("scholarships.id"), nullable=True, index=True)
+    eligibility_status = Column(String(24), nullable=True)
+    reason_codes = Column(Text, nullable=False, default="[]", server_default="[]")
+    criteria_version = Column(Integer, nullable=True)
+
+
+class Scholarship(Base):
+    __tablename__ = "scholarships"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(160), nullable=False)
+    provider = Column(String(160), nullable=False)
+    description = Column(Text, nullable=False, default="", server_default="")
+    amount = Column(Float, nullable=False)
+    application_url = Column(String(512), nullable=False)
+    opens_at = Column(DateTime, nullable=False)
+    closes_at = Column(DateTime, nullable=False)
+    status = Column(String(24), nullable=False, default="DRAFT", server_default="DRAFT", index=True)
+    created_by_faculty_id = Column(Integer, ForeignKey("faculty.id"), nullable=False, index=True)
+    department_code = Column(String(8), ForeignKey("departments.code"), nullable=False, index=True)
+    approved_by_hod_id = Column(Integer, ForeignKey("faculty.id"), nullable=True)
+    approval_comment = Column(Text, nullable=False, default="", server_default="")
+    rejection_reason = Column(Text, nullable=False, default="", server_default="")
+    official_document_reference = Column(String(512), nullable=False, default="", server_default="")
+    criteria_version = Column(Integer, nullable=False, default=1, server_default="1")
+    # JSON text keeps this schema portable to SQLite unit tests and PostgreSQL.
+    criteria = Column(Text, nullable=False, default="{}", server_default="{}")
+    published_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    creator = relationship("Faculty", foreign_keys=[created_by_faculty_id])
+
+
+class ScholarshipApplication(Base):
+    __tablename__ = "scholarship_applications"
+    __table_args__ = (UniqueConstraint("scholarship_id", "student_usn",
+                                       name="uq_scholarship_application"),)
+    id = Column(Integer, primary_key=True)
+    scholarship_id = Column(Integer, ForeignKey("scholarships.id"), nullable=False, index=True)
+    student_usn = Column(String(16), ForeignKey("students.usn"), nullable=False, index=True)
+    application_status = Column(String(24), nullable=False, default="SUBMITTED", server_default="SUBMITTED")
+    applied_at = Column(DateTime, default=utcnow, nullable=False)
+    external_reference = Column(String(256), nullable=False, default="", server_default="")
+    verified_by = Column(Integer, ForeignKey("faculty.id"), nullable=True)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class PlacementDrive(Base):
