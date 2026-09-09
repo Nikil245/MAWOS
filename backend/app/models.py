@@ -324,3 +324,6 @@ class IntentLog(Base):
     expected_intent = Column(String(64), nullable=True)
     correct = Column(Boolean, nullable=True)
     created_at = Column(DateTime, default=utcnow)
+
+# Register the narrowly scoped timetable version/configuration tables.
+from .timetable import models as timetable_models  # noqa: E402,F401

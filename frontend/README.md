@@ -21,3 +21,12 @@ current FastAPI contract has no endpoints for library records, event check-in,
 user/permission administration, backup/redeploy controls, or infrastructure
 metrics. The UI labels these as unavailable instead of sending invented API
 requests or simulating state-changing operations.
+
+## Academic timetables
+
+Role-gated timetable pages live under `src/pages/timetable/`. HODs configure,
+generate and review drafts, lock lesson blocks and explicitly publish. Students
+and faculty read their own published weekly/today/current-next schedules; faculty
+can configure availability before publication. Admin manages terms, periods and
+rooms, and principal sees read-only coverage. Scheduling and validation are
+server-authoritative. See [the timetable contract](../docs/TIMETABLE.md).

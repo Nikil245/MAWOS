@@ -1,6 +1,2 @@
-import { Download, Printer } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { api, downloadTimetable } from '../../services/api';
-import { useApi } from '../../hooks/useApi';
-import { ErrorState, LoadingSkeleton, PageHeader } from '../../components/ui';
-export default function StudentTimetable() { const { token } = useAuth(); const { data, loading, error } = useApi(() => api.studentDashboard(token), [token]); if (loading) return <LoadingSkeleton />; if (error) return <ErrorState error={error} />; const g = data.timetable; return <><PageHeader title="My timetable" eyebrow="Student portal / Academic schedule" actions={<><button className="btn-secondary" onClick={() => window.print()}><Printer size={16} />Print</button><button className="btn-primary" onClick={() => downloadTimetable(token, data.profile.dept, data.profile.year, data.profile.section)}><Download size={16} />CSV</button></>} /><div className="card overflow-x-auto"><table className="min-w-[760px] w-full text-sm"><thead><tr className="bg-navy text-left text-white"><th className="p-3">Day</th>{g.periods.map((p) => <th className="p-3" key={p}>{p}</th>)}</tr></thead><tbody>{g.days.map((day, dayIndex) => <tr className="border-b" key={day}><th className="p-3 text-left">{day}</th>{g.periods.map((_, periodIndex) => { const cell = g.cells[`${dayIndex}-${periodIndex}`]; return <td className="p-3" key={periodIndex}>{cell && <><p className="font-semibold">{cell.subject}</p><p className="text-xs text-muted">{cell.subject_name}</p></>}</td>; })}</tr>)}</tbody></table></div></>; }
+import { PersonalTimetable } from '../timetable/Timetable';
+export default function StudentTimetable() { return <PersonalTimetable role="student" />; }

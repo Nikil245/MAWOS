@@ -49,8 +49,9 @@ set -a; source .env; set +a
 MAWOS reads environment variables directly; load `.env` into the shell (as
 above) or configure the same values through your process manager.
 
-When demo seeding is explicitly enabled, the first launch seeds the institution
-and solves the timetable. Roughly 60 s of one-time setup.
+When demo seeding is explicitly enabled, the first launch seeds the institution.
+Timetable configuration, draft generation and publication are explicit role-authorized
+actions; startup never generates a timetable. See [Academic timetables](docs/TIMETABLE.md).
 
 Run MAWOS in two terminals:
 
@@ -117,6 +118,17 @@ Never run `pytest` against populated `mawos`. Unit tests force an isolated
 SQLite database. PostgreSQL integration tests require an explicitly configured
 separate `MAWOS_POSTGRES_TEST_URL` targeting `mawos_test`.
 
+Timetable configuration can be previewed from the existing PostgreSQL academic
+rows without writes. Weekly demand is never inferred unless explicitly enabled:
+
+```bash
+set -a; source .env; set +a
+.venv/bin/python scripts/bootstrap_timetable_data.py --dry-run --term-id 1
+```
+
+See `docs/TIMETABLE.md` for the guarded apply options, placeholder-room warning,
+and the HOD/Admin preview endpoint.
+
 Alembic is configured with an empty baseline revision for the existing public
 schema. After the read-only verification and confirmed backup, review it and
 record the baseline only with:
@@ -174,7 +186,7 @@ production.
 |---|---|---|
 | Student | `4MT23AI049` / `student123` | attendance & CIE marks, fees + pay, hall-ticket status, scholarship, placements, personal timetable + CSV download, notices, assistant |
 | Faculty | `aiml.f02` / `faculty123` | own teaching assignments, **mark class attendance** (only for assigned subject-sections — enforced server-side), enter internal marks, own teaching timetable |
-| HOD | `hod.aiml` / `faculty123` | department analytics, section-wise timetables, **regenerate the department timetable**, fee-defaulter list |
+| HOD | `hod.aiml` / `faculty123` | department analytics, section-wise timetables, **configure, generate, validate and publish versioned department timetables**, fee-defaulter list |
 | Principal | `principal` / `principal123` | institution-wide analytics: department comparison, fee collection, placements, admissions funnel |
 | Admin | `admin` / `admin123` | **full admissions pipeline** (verify → merit rank → allot seats vs intake → enrol), demo cascade trigger |
 
@@ -317,6 +329,23 @@ agents" — students and faculty are *roles with permissions*, not agents.
 
 ---
 
+## Academic timetable workflow
+
+The application uses a Python MRV solver with bounded repair and hill climbing,
+independent validation, term-scoped configuration, immutable published versions,
+and atomic publication. HODs manage drafts and locks; students and faculty see
+only their own published schedules, including current/next classes in Asia/Kolkata.
+Admin configures terms, periods and rooms; principal has a read-only coverage view.
+
+The additive migration `20260908_timetable` is required before starting the updated
+PostgreSQL application. It was tested only on `mawos_test`; no live migration was
+executed. See [configuration, API, safety and limitations](docs/TIMETABLE.md) and
+[verification results](docs/TIMETABLE_VERIFICATION.md).
+
+The following P1 results and original research solvers are preserved as frozen
+research artifacts. Their unversioned `timetable_slots` are no longer the source
+for application timetable views.
+
 ## Scheduler (P1): objective-driven, not just feasible
 
 v2's timetable solver was a randomized greedy with restarts — feasible, but
@@ -342,16 +371,11 @@ individual seed values were never stored, only the band. P1 lands within
 each objective term in turn) confirms every term is load-bearing: none of
 them can be dropped without moving the objective.
 
-**Live solver simulation (UI only, not a research result).** HOD dashboard
-→ Department → "Watch solver (live simulation)" replays this same P1
-solver's own event trace — seed placements, then the real cost/temperature
-curve from annealing — so a section's timetable visibly builds itself.
-`backend/app/scheduler_live.py` is strictly additive (zero diff to
-`scheduler.py`; reuses the real, unmodified `anneal()`). Added 2026-08-25
-after a stale, never-regenerated `timetable_slots` table (auto-seeded once
-and never refreshed) was mistaken for a broken solver — regenerating with
-this same P1 code produces a clean, gap-free schedule, which is what this
-view demonstrates live.
+**Historical solver simulation (not a research result).**
+`backend/app/scheduler_live.py` retains the P1 solver event trace for research
+replays. Its former direct-generation API has been retired in favor of explicit
+draft generation and publication. The new HOD workspace reports actual solver
+metrics and validation results without implying that a draft is published.
 
 ---
 
@@ -483,7 +507,8 @@ backend/app/
     orchestrator.py    confidence-gated router + tool-calling loop [agent]
     eligibility.py     hall-ticket + scholarship, merged at P2 [agent]
     timetable.py       objective + greedy seed + simulated annealing (P1) [agent]
-  scheduler_live.py  additive event-trace wrapper for the live simulation UI (not research)
+  timetable/         versioned academic configuration, pure solver, validator and role APIs
+  scheduler_live.py  preserved legacy event-trace wrapper
     attendance.py      intake, recompute, proactive scan [agent]
     tools.py           typed tool registry (12 tools) with ROLE ENFORCEMENT
     admission.py       admissions pipeline [tool-backed, not an agent]

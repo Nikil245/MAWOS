@@ -37,6 +37,7 @@ export async function request(path, { method, body, token, signal } = {}) {
   if (!response.ok) {
     let message = response.statusText;
     try { message = (await response.json()).detail || message; } catch { /* non JSON error */ }
+    if (typeof message === 'object') message = message.message ? `${message.message} ${(message.issues || []).map(i => i.message).join(' ')}` : 'Request validation failed. Check the supplied values.';
     const error = new ApiError(message, response.status, errorCategory(response.status));
     if (error.status === 401) onUnauthorized?.();
     throw error;
@@ -63,7 +64,6 @@ export const api = {
   scholarshipAction: (token, path, body) => request(path, { token, body, method: 'POST' }),
   saveScholarship: (token, id, body) => request(id ? `/faculty/scholarships/${id}` : '/faculty/scholarships', { token, body, method: id ? 'PUT' : 'POST' }),
   hodAnalytics: (token) => request('/hod/analytics', { token }),
-  generateTimetable: (token) => request('/hod/generate-timetable', { token, method: 'POST' }),
   timetable: (token, dept, year, section) => request(`/timetable/${dept}/${year}/${section}`, { token }),
   principalAnalytics: (token) => request('/principal/analytics', { token }),
   admissions: (token) => request('/admin/admissions', { token }),

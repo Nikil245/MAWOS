@@ -1,5 +1,2 @@
-import { useAuth } from '../../context/AuthContext';
-import { api } from '../../services/api';
-import { useApi } from '../../hooks/useApi';
-import { ErrorState, LoadingSkeleton, PageHeader } from '../../components/ui';
-export default function FacultyTimetable() { const { token } = useAuth(); const { data, loading, error } = useApi(() => api.facultyOverview(token), [token]); if (loading) return <LoadingSkeleton />; if (error) return <ErrorState error={error} />; const g = data.timetable; return <><PageHeader title="My timetable" eyebrow="Faculty workspace / Weekly teaching schedule" /><div className="card overflow-x-auto"><table className="min-w-[760px] w-full text-sm"><thead><tr className="bg-navy text-left text-white"><th className="p-3">Day</th>{g.periods.map((p) => <th className="p-3" key={p}>{p}</th>)}</tr></thead><tbody>{g.days.map((day, d) => <tr className="border-b" key={day}><th className="p-3 text-left">{day}</th>{g.periods.map((_, p) => { const c = g.cells[`${d}-${p}`]; return <td className="p-3" key={p}>{c && <><p className="font-semibold">{c.subject}</p><p className="text-xs text-muted">{c.class}</p></>}</td>; })}</tr>)}</tbody></table></div></>; }
+import { PersonalTimetable } from '../timetable/Timetable';
+export default function FacultyTimetable() { return <PersonalTimetable role="faculty" />; }

@@ -446,16 +446,14 @@ def get_placements(db, agents, user, args):
       {"dept": {"type": "string"}, "year": {"type": "integer"},
        "section": {"type": "string"}})
 def get_timetable(db, agents, user, args):
-    tt = agents["timetable_agent"]
+    from ..timetable import reads
     if user.role == "student":
-        s = _student_ctx(db, user)
-        return tt.grid(db, s.dept_code, s.year, s.section)
+        student = _student_ctx(db, user)
+        return reads.grid(db, student.dept_code, student.year, student.section, semester=student.semester)
     if user.role in ("faculty", "hod") and not args.get("dept"):
-        if user.faculty_id:
-            return tt.faculty_grid(db, user.faculty_id)
-    dept = str(args.get("dept") or "AIML").upper()
-    return tt.grid(db, dept, int(args.get("year") or 3),
-                   str(args.get("section") or "A").upper())
+        return reads.grid(db, faculty_id=user.faculty_id)
+    return reads.authorized_grid(db, user, str(args.get("dept") or user.dept_code or "AIML").upper(),
+                                 int(args.get("year") or 3), str(args.get("section") or "A").upper())
 
 
 @tool("get_exam_schedule", "Semester-end exam schedule for a dept/semester.",

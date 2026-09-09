@@ -1,5 +1,6 @@
 """REST API v2 — role-scoped gateway in front of the agent layer."""
 import datetime as dt
+from ..timetable import reads as timetable_reads
 import logging
 import math
 from typing import Literal
@@ -202,8 +203,7 @@ def student_dashboard(user: User = Depends(require_role("student")),
                         if ht else None),
         "scholarship": {**workflow_scholarship, "status": workflow_scholarship["state"]},
         "placements": agents["placement_agent"].student_view(db, user.usn),
-        "timetable": agents["timetable_agent"].grid(db, s.dept_code, s.year,
-                                                    s.section),
+        "timetable": timetable_reads.grid(db, s.dept_code, s.year, s.section, semester=s.semester),
         "exams": agents["eligibility_agent"].schedule_for(db, s.dept_code, s.semester),
         "notifications": agents["notification_agent"].for_user(
             db, usn=user.usn),
@@ -226,16 +226,22 @@ async def pay_fee(body: PayFeeRequest,
 def timetable(dept: str, year: int, section: str,
               user: User = Depends(get_current_user),
               db: Session = Depends(get_session)):
-    return get_agents()["timetable_agent"].grid(db, dept.upper(), year,
-                                                section.upper())
+    return timetable_reads.authorized_grid(db, user, dept.upper(), year, section.upper())
 
 
 @router.get("/timetable/{dept}/{year}/{section}/csv")
 def timetable_csv(dept: str, year: int, section: str,
                   user: User = Depends(get_current_user),
                   db: Session = Depends(get_session)):
-    csv = get_agents()["timetable_agent"].csv_export(db, dept.upper(), year,
-                                                     section.upper())
+    import csv as csv_module
+    import io
+    grid = timetable_reads.authorized_grid(db, user, dept.upper(), year, section.upper())
+    stream = io.StringIO()
+    writer = csv_module.writer(stream)
+    writer.writerow(['Day', *grid['periods']])
+    for day, label in enumerate(grid['days']):
+        writer.writerow([label, *[grid['cells'].get(f'{day}-{period}', {}).get('subject', '') for period in range(len(grid['periods']))]])
+    csv = stream.getvalue()
     return PlainTextResponse(csv, media_type="text/csv", headers={
         "Content-Disposition":
             f"attachment; filename=timetable_{dept}_{year}{section}.csv"})
@@ -248,7 +254,7 @@ def faculty_overview(user: User = Depends(require_role("faculty", "hod")),
     agents = get_agents()
     assignments = agents["academic_agent"].faculty_assignments(db, user.faculty_id)
     return {"assignments": assignments,
-            "timetable": agents["timetable_agent"].faculty_grid(db, user.faculty_id),
+            "timetable": timetable_reads.grid(db, faculty_id=user.faculty_id),
             "notifications": agents["notification_agent"].for_user(
                 db, role=user.role, dept=user.dept_code)}
 
@@ -447,30 +453,9 @@ def hod_analytics(user: User = Depends(require_role("hod", "principal", "admin")
 
 
 @router.post("/hod/generate-timetable")
-async def hod_generate_timetable(
-        user: User = Depends(require_role("hod", "admin")),
-        db: Session = Depends(get_session)):
-    scope = user.dept_code if user.role == "hod" else None
-    return await get_agents()["timetable_agent"].generate_and_announce(
-        db, scope, user.username)
-
-
 @router.post("/hod/generate-timetable-live")
-async def hod_generate_timetable_live(
-        user: User = Depends(require_role("hod", "admin")),
-        db: Session = Depends(get_session)):
-    """Same regeneration as above, plus a replayable solver event trace
-    (seed placements in order, real cost/temperature curve from
-    annealing) for the front-end's live simulation view."""
-    scope = user.dept_code if user.role == "hod" else None
-    agent = get_agents()["timetable_agent"]
-    result = agent.generate_live(db, scope)
-    if result.get("ok"):
-        await agent.publish("timetable.generated", {
-            "scope": result["scope"], "sections": result["sections"],
-            "placement_rate": result["placement_rate"],
-            "solve_ms": result["solve_ms"], "triggered_by": user.username})
-    return result
+def legacy_timetable_generation(user: User = Depends(require_role("hod", "admin"))):
+    raise HTTPException(410, "Use the academic-term timetable workspace to generate a draft and explicitly publish it.")
 
 
 # ---------- principal --------------------------------------------------------------------

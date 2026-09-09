@@ -8,8 +8,7 @@ from . import config, llm
 from . import router as hybrid_router
 from .agents import get_agents
 from .api.routes import router
-from .database import Base, SessionLocal, engine, verify_existing_schema
-from .models import TimetableSlot
+from .database import Base, engine, verify_existing_schema
 from .seed import bootstrap_evaluations, seed_all
 
 PROACTIVE_INTERVAL_S = 300  # agents run their own scans every 5 minutes
@@ -44,17 +43,6 @@ async def lifespan(app: FastAPI):
         if freshly_seeded:
             print("[MAWOS] fresh demo data seeded — bootstrapping evaluations…")
             bootstrap_evaluations(agents)
-    if database_backend == "sqlite":
-        db = SessionLocal()
-        try:
-            if db.query(TimetableSlot).count() == 0:
-                print("[MAWOS] generating institution timetable…")
-                result = agents["timetable_agent"].generate(db)
-                print(f"[MAWOS] timetable: {result['slots_placed']} slots, "
-                      f"{result['placement_rate']}% placed, "
-                      f"{result['solve_ms']} ms")
-        finally:
-            db.close()
     # Ollama is optional and is checked only for a low-confidence chat turn;
     # application startup must never block on or depend on it.
     mode = (f"hybrid router, tau {hybrid_router.TAU:.2f}, local runtime model "
@@ -66,6 +54,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="MAWOS", version="2.0.0", lifespan=lifespan)
+from .timetable.api import router as timetable_router
+from .timetable import reads  # Register published-view routes.
+app.include_router(timetable_router)
 app.include_router(router)
 
 
