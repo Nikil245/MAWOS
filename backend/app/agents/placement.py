@@ -1,141 +1,67 @@
-"""Placement Agent — final-year drive eligibility (dept + criteria filters)
-with calibrated Random Forest success-probability ranking."""
-import datetime as dt
-
-import joblib
-
-from .. import config
-from ..models import PlacementDrive, PlacementShortlist, Student
-from .attendance import overall_percentage
+"""Placement event adapter; domain rules live in placement.service."""
+from ..placement import scoring
+from ..placement.service import PlacementService, normalize_usn
 from .base import BaseAgent
-
-_MODEL_PATH = config.ML_MODELS_DIR / "placement_rf.joblib"
 
 
 class PlacementAgent(BaseAgent):
-    name = "placement_agent"
-    description = "Final-year drive eligibility + Random Forest ranking"
+    name = 'placement_agent'
+    description = 'Final-year recruitment drives, eligibility and placement outcomes'
 
     def __init__(self, bus):
         super().__init__(bus)
-        self.model = None
-        if _MODEL_PATH.exists():
-            # Safe: artifact produced locally by ml/train.py in this repo.
-            self.model = joblib.load(_MODEL_PATH)
+        scoring.threshold()
+        self.model, self.model_version = scoring.load_model()
+
+    @property
+    def service(self):
+        return PlacementService(self.model, self.model_version)
 
     def register_subscriptions(self):
-        self.bus.subscribe("attendance.updated", self.name, self.on_upstream_change)
+        self.bus.subscribe('attendance.updated', self.name, self.on_upstream_change)
+        self.bus.subscribe('fees.updated', self.name, self.on_upstream_change)
 
-    async def on_upstream_change(self, payload: dict):
-        updates = payload.get("updates", payload.get("usns", []))
+    async def on_upstream_change(self, payload):
+        updates = payload.get('updates', payload.get('usns', []))
+        usns = sorted({normalize_usn(item['usn'] if isinstance(item, dict) else item) for item in updates})
         db = self.session()
+        evaluated, changed = [], 0
         try:
-            drives = self._upcoming_drives(db)
-            changed = 0
-            for u in updates:
-                usn = u["usn"] if isinstance(u, dict) else u
-                att = u.get("overall_percentage") if isinstance(u, dict) else None
-                changed += self.evaluate_student(db, usn, drives=drives,
-                                                 attendance=att)
+            # Acquire drive locks in a stable order for multi-student batches.
+            for drive in self.service.active_drives(db):
+                for usn in usns:
+                    count = self.service.reevaluate_student(db, usn, drives=[drive])
+                    changed += count
+                    if count and usn not in evaluated:
+                        evaluated.append(usn)
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
-        usns = [u["usn"] if isinstance(u, dict) else u for u in updates]
-        await self.publish("placement.updated", {
-            "workflow_id": payload["workflow_id"],
-            "_hop": payload.get("_hop", 1),
-            "usns": usns, "entries_updated": changed})
+        await self.publish('placement.updated', dict(workflow_id=payload.get('workflow_id'),
+                           _hop=payload.get('_hop', 1), usns=evaluated, entries_updated=changed))
 
     def _upcoming_drives(self, db):
-        cutoff = dt.date.today() - dt.timedelta(days=7)
-        return (db.query(PlacementDrive)
-                  .filter(PlacementDrive.drive_date >= cutoff)
-                  .order_by(PlacementDrive.drive_date).all())
+        return self.service.active_drives(db)
 
-    def _drive_evaluation(self, student, drive, attendance: float) -> tuple[bool, float | None, str]:
-        """Calculate one shortlist result without changing ORM state."""
-        prob = None
-        if self.model is not None:
-            prob = float(self.model.predict_proba(
-                [[student.cgpa, student.backlogs, attendance]])[0][1])
-        reasons = []
-        allowed = (drive.departments == "ALL"
-                   or student.dept_code in drive.departments.split(","))
-        if not allowed:
-            reasons.append(f"drive not open to {student.dept_code}")
-        if student.cgpa < drive.min_cgpa:
-            reasons.append(f"CGPA {student.cgpa} < required {drive.min_cgpa}")
-        if student.backlogs > drive.max_backlogs:
-            reasons.append(f"{student.backlogs} backlogs > allowed {drive.max_backlogs}")
-        if attendance < drive.min_attendance:
-            reasons.append(f"attendance {attendance}% < {drive.min_attendance}%")
-        eligible = not reasons
-        if eligible:
-            reasons.append("meets all drive criteria")
-        return eligible, prob if eligible else None, "; ".join(reasons)
+    def evaluate_student(self, db, usn, drives=None, attendance=None):
+        return self.service.reevaluate_student(db, usn, drives, attendance)
 
-    def evaluate_student(self, db, usn: str, drives=None,
-                         attendance: float | None = None) -> int:
-        student = db.get(Student, usn)
-        if student is None or student.year != 4:   # placements = final years
-            return 0
-        if attendance is None:
-            attendance = overall_percentage(db, usn)
-        if drives is None:
-            drives = self._upcoming_drives(db)
-        existing = {e.drive_id: e for e in
-                    db.query(PlacementShortlist).filter_by(usn=usn).all()}
-        changed = 0
-        for drive in drives:
-            eligible, probability, reasons = self._drive_evaluation(
-                student, drive, attendance)
-            entry = existing.get(drive.id)
-            if entry is None:
-                entry = PlacementShortlist(drive_id=drive.id, usn=usn,
-                                           eligible=eligible)
-                db.add(entry)
-            entry.eligible = eligible
-            entry.ml_probability = probability
-            entry.reasons = reasons
-            changed += 1
-        return changed
-
-    def student_view(self, db, usn: str) -> list[dict]:
-        student = db.get(Student, usn)
-        if student is None:
+    def student_view(self, db, usn):
+        # Preserve dashboard / assistant field names, with stored-or-preview reads.
+        from ..models import Student
+        if db.get(Student, normalize_usn(usn)) is None:
             return []
-        drives = self._upcoming_drives(db)
-        entries = {e.drive_id: e for e in
-                   db.query(PlacementShortlist).filter_by(usn=usn).all()}
-        calculated = {}
-        if student.year == 4:
-            attendance = overall_percentage(db, usn)
-            calculated = {drive.id: self._drive_evaluation(student, drive, attendance)
-                          for drive in drives}
-        out = []
-        for d in drives[:15]:
-            e = entries.get(d.id)
-            if d.id in calculated:
-                eligible, probability, reasons = calculated[d.id]
-            else:
-                eligible = bool(e and e.eligible)
-                probability = e.ml_probability if e else None
-                reasons = e.reasons if e else \
-                    ("placements open in final year" if student.year != 4 else "")
-            out.append({"company": d.company, "role": d.role,
-                        "package_lpa": d.package_lpa, "date": str(d.drive_date),
-                        "departments": d.departments,
-                        "eligible": eligible, "probability": probability,
-                        "reasons": reasons})
-        return out
+        result = []
+        for drive in self._upcoming_drives(db)[:15]:
+            entry = self.service.eligibility(db, drive.id, usn)
+            result.append(dict(company=drive.company, role=drive.role, package_lpa=drive.package_lpa,
+                               date=str(drive.drive_date), departments=drive.departments,
+                               eligible=bool(entry['eligible']), probability=entry['ml_probability'],
+                               reasons=entry['reasons'], status=entry['status']))
+        return result
 
-    def stats(self, db) -> dict:
-        from sqlalchemy import func
-        eligible = (db.query(Student.dept_code,
-                             func.count(func.distinct(PlacementShortlist.usn)))
-                      .join(PlacementShortlist,
-                            PlacementShortlist.usn == Student.usn)
-                      .filter(PlacementShortlist.eligible.is_(True))
-                      .group_by(Student.dept_code).all())
-        return {"upcoming_drives": len(self._upcoming_drives(db)),
-                "eligible_finalists_by_dept": {d: c for d, c in eligible}}
+    def stats(self, db):
+        return self.service.stats(db)

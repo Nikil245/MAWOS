@@ -17,6 +17,7 @@ class ConfigurationError(RuntimeError):
 
 
 ENVIRONMENTS = frozenset({"development", "test", "production"})
+DATABASE_MODES = frozenset({"external", "docker"})
 MIN_JWT_SECRET_BYTES = 32
 
 # This fallback is deliberately limited to non-production modes. It is
@@ -164,8 +165,26 @@ def database_backend() -> str:
     return make_url(DATABASE_URL).get_backend_name()
 
 
+def database_mode() -> str:
+    """Return the explicitly selected database deployment target.
+
+    This prevents a Compose deployment from accidentally treating a fresh
+    local volume as the institution's existing PostgreSQL database.
+    """
+    raw_mode = os.getenv("MAWOS_DATABASE_MODE")
+    if raw_mode is None or not raw_mode.strip():
+        raise ConfigurationError(
+            "MAWOS_DATABASE_MODE must be explicitly configured as external or docker"
+        )
+    mode = raw_mode.strip().lower()
+    if mode not in DATABASE_MODES:
+        raise ConfigurationError("MAWOS_DATABASE_MODE must be external or docker")
+    return mode
+
+
 def validate_database_configuration() -> None:
     """Validate the selected backend and PostgreSQL seed safeguards."""
+    database_mode()
     backend = database_backend()
     if backend not in {"sqlite", "postgresql"}:
         raise ConfigurationError("MAWOS_DATABASE_URL selects an unsupported backend")

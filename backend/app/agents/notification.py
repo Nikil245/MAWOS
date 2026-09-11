@@ -14,6 +14,31 @@ class NotificationAgent(BaseAgent):
         self.bus.subscribe("scholarship.updated", self.name, self.on_scholarship_updated)
         self.bus.subscribe("admission.enrolled", self.name, self.on_admission_enrolled)
         self.bus.subscribe("timetable.generated", self.name, self.on_timetable_generated)
+        self.bus.subscribe("placement.notification_required", self.name, self.on_placement_shortlisted)
+
+    async def on_placement_shortlisted(self, payload):
+        from ..models import PlacementDrive, PlacementShortlist, Student
+        from ..placement.service import normalize_usn
+        if payload.get('notification_type') != 'PLACEMENT_SHORTLISTED':
+            return
+        usn, drive_id = normalize_usn(payload.get('usn')), payload.get('drive_id')
+        db = self.session()
+        try:
+            # Serializes duplicate event deliveries for this student on PostgreSQL.
+            student = db.query(Student).filter_by(usn=usn).with_for_update().one_or_none()
+            drive = db.get(PlacementDrive, drive_id)
+            entry = db.query(PlacementShortlist).filter_by(drive_id=drive_id, usn=usn, eligible=True).first()
+            if student is None or drive is None or entry is None:
+                return
+            title = f'Placement shortlisted · drive {drive.id}'
+            if not db.query(Notification.id).filter_by(usn=usn, title=title, source_agent=self.name).first():
+                self._notify(db, title, f'You have been shortlisted for {drive.company} — {drive.role}.', usn=usn)
+                db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def _notify(self, db, title, message, usn=None, role=None, dept=None):
         db.add(Notification(usn=usn, audience_role=role, dept_code=dept,

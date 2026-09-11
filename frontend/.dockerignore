@@ -1,0 +1,11 @@
+.env
+.env.*
+node_modules
+dist
+build
+.vite
+coverage
+src/test
+*.log
+*.pem
+*.key

@@ -1,4 +1,7 @@
-const API_ROOT = '/api';
+// Default to a same-origin relative path so neither development nor the
+// production bundle hard-codes a localhost or Docker-only address.
+const configuredApiRoot = import.meta.env.VITE_API_BASE_URL?.trim();
+const API_ROOT = (configuredApiRoot || '/api').replace(/\/$/, '');
 let onUnauthorized = null;
 export function setUnauthorizedHandler(handler) { onUnauthorized = handler; }
 
@@ -47,6 +50,13 @@ export async function request(path, { method, body, token, signal } = {}) {
 }
 
 export const api = {
+  placementDrives: (token) => request('/placements/drives', { token }),
+  savePlacementDrive: (token, id, body) => request(id ? `/placements/drives/${id}` : '/placements/drives', { token, body, method: id ? 'PUT' : 'POST' }),
+  placementAction: (token, id, action, body = {}) => request(`/placements/drives/${id}/${action}`, { token, body, method: 'POST' }),
+  placementShortlist: (token, id) => request(`/placements/drives/${id}/shortlist`, { token }),
+  placementEligibility: (token, id, usn) => request(`/placements/drives/${id}/eligibility/${encodeURIComponent(usn)}`, { token }),
+  placementOutcomes: (token, id) => request(`/placements/drives/${id}/outcomes`, { token }),
+  savePlacementOutcome: (token, id, usn, body) => request(`/placements/drives/${id}/outcomes/${encodeURIComponent(usn)}`, { token, body, method: 'PUT' }),
   login: (username, password) => request('/auth/login', { body: { username, password } }),
   me: (token) => request('/me', { token }),
   notifications: (token, signal) => request('/notifications', { token, signal }),

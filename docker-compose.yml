@@ -1,0 +1,82 @@
+name: mawos
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      MAWOS_ENV: ${MAWOS_ENV:-development}
+      MAWOS_DATABASE_MODE: ${MAWOS_DATABASE_MODE:?set MAWOS_DATABASE_MODE to external or docker in .env}
+      MAWOS_JWT_SECRET: ${MAWOS_JWT_SECRET:-}
+      MAWOS_SEED_DEMO_DATA: "false"
+      # Keep the native URL in .env for Alembic and host-side tools. Containers
+      # receive the separate gateway URL only; Compose fails before startup
+      # when external mode is selected without it.
+      MAWOS_DATABASE_URL: ${MAWOS_DOCKER_DATABASE_URL:?set MAWOS_DOCKER_DATABASE_URL in .env for external Docker deployments}
+      MAWOS_OLLAMA_HOST: ${MAWOS_OLLAMA_HOST:-http://ollama:11434}
+      MAWOS_OLLAMA_MODEL: ${MAWOS_OLLAMA_MODEL:-qwen2.5:3b}
+      MAWOS_OLLAMA_TIMEOUT: ${MAWOS_OLLAMA_TIMEOUT:-20}
+      MAWOS_OLLAMA_CONTEXT: ${MAWOS_OLLAMA_CONTEXT:-2048}
+      MAWOS_OLLAMA_MAX_OUTPUT_TOKENS: ${MAWOS_OLLAMA_MAX_OUTPUT_TOKENS:-192}
+      MAWOS_OLLAMA_MAX_RESPONSE_CHARS: ${MAWOS_OLLAMA_MAX_RESPONSE_CHARS:-12000}
+      MAWOS_OLLAMA_MAX_ROUNDS: ${MAWOS_OLLAMA_MAX_ROUNDS:-2}
+      MAWOS_OLLAMA_CONCURRENCY: ${MAWOS_OLLAMA_CONCURRENCY:-1}
+      MAWOS_OLLAMA_HEALTH_TTL: ${MAWOS_OLLAMA_HEALTH_TTL:-5}
+      MAWOS_OLLAMA_RETRY_COOLDOWN: ${MAWOS_OLLAMA_RETRY_COOLDOWN:-2}
+      MAWOS_PROVENANCE_GATE: ${MAWOS_PROVENANCE_GATE:-1}
+      MAWOS_PLACEMENT_MODEL_THRESHOLD: ${MAWOS_PLACEMENT_MODEL_THRESHOLD:-0.5}
+    # External mode uses host.docker.internal. Docker mode adds the database
+    # dependency only through docker-compose.docker-db.yml.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    networks: [mawos_internal]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:8080"
+    networks: [mawos_internal]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    profiles: ["ollama"]
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    networks: [mawos_internal]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  ollama_data:
+
+networks:
+  mawos_internal:
+    driver: bridge

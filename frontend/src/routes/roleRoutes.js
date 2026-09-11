@@ -13,11 +13,11 @@ export const scholarshipRouteByRole = {
 };
 
 const allowedPaths = {
-  student: ['/student', '/student/timetable', '/student/scholarships', '/assistant', '/system'],
+  student: ['/student/placements', '/student', '/student/timetable', '/student/scholarships', '/assistant', '/system'],
   faculty: ['/faculty', '/faculty/timetable', '/faculty/scholarships', '/assistant', '/system'],
   hod: ['/hod/timetable', '/faculty/timetable', '/hod', '/hod/scholarships', '/faculty', '/assistant', '/system'],
   principal: ['/principal/timetable', '/principal', '/assistant', '/system'],
-  admin: ['/admin/timetable', '/principal/timetable', '/admin', '/principal', '/assistant', '/system'],
+  admin: ['/admin/placements', '/admin/timetable', '/principal/timetable', '/admin', '/principal', '/assistant', '/system'],
 };
 
 export function isRouteAllowedForRole(role, pathname) {

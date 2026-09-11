@@ -8,7 +8,7 @@ from . import config, llm
 from . import router as hybrid_router
 from .agents import get_agents
 from .api.routes import router
-from .database import Base, engine, verify_existing_schema
+from .database import Base, engine, startup_diagnostic, verify_existing_schema
 from .seed import bootstrap_evaluations, seed_all
 
 PROACTIVE_INTERVAL_S = 300  # agents run their own scans every 5 minutes
@@ -30,6 +30,13 @@ async def lifespan(app: FastAPI):
     config.validate_security_configuration()
     config.validate_database_configuration()
     database_backend = config.database_backend()
+    database_mode = config.database_mode()
+    diagnostic = startup_diagnostic()
+    print("[MAWOS] database target: "
+          f"mode={database_mode}, host={diagnostic['host']}, "
+          f"database={diagnostic['database']}, "
+          f"current_database={diagnostic['current_database']}, "
+          f"migration_revision={diagnostic['migration_revision']}")
     if database_backend == "sqlite":
         # SQLite remains supported for local development and isolated tests.
         Base.metadata.create_all(bind=engine)
@@ -58,6 +65,8 @@ from .timetable.api import router as timetable_router
 from .timetable import reads  # Register published-view routes.
 app.include_router(timetable_router)
 app.include_router(router)
+from .placement.api import router as placement_router
+app.include_router(placement_router)
 
 
 @app.get("/", tags=["service"])

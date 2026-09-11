@@ -6,7 +6,7 @@ import datetime as dt
 
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, Float, ForeignKey, Integer,
-    String, Text, UniqueConstraint,
+    String, Text, UniqueConstraint, CheckConstraint, Index, func,
 )
 from sqlalchemy.orm import relationship
 
@@ -262,6 +262,10 @@ class ScholarshipApplication(Base):
 
 class PlacementDrive(Base):
     __tablename__ = "placement_drives"
+    __table_args__ = (
+        CheckConstraint("status IN ('DRAFT','OPEN','SHORTLIST_GENERATED','CLOSED','CANCELLED')", name="ck_placement_drive_status"),
+        Index("ix_placement_drive_status_date", "status", "drive_date"),
+    )
     id = Column(Integer, primary_key=True)
     company = Column(String(128), nullable=False)
     role = Column(String(128), nullable=False)
@@ -271,6 +275,11 @@ class PlacementDrive(Base):
     min_attendance = Column(Float, nullable=False, default=75.0)
     drive_date = Column(Date, nullable=False)
     departments = Column(String(64), nullable=False, default="ALL")  # csv of codes
+    status = Column(String(24), nullable=False, default="OPEN", server_default="OPEN")
+    requires_fee_clearance = Column(Boolean, nullable=False, default=False, server_default="false")
+    application_deadline = Column(Date, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now())
 
 
 class PlacementShortlist(Base):
@@ -281,9 +290,26 @@ class PlacementShortlist(Base):
     usn = Column(String(16), ForeignKey("students.usn"), nullable=False, index=True)
     eligible = Column(Boolean, nullable=False)
     ml_probability = Column(Float, nullable=True)
+    model_version = Column(String(16), nullable=True)
     reasons = Column(Text, nullable=False, default="")
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     drive = relationship("PlacementDrive")
+
+
+class PlacementOutcome(Base):
+    __tablename__ = "placement_outcomes"
+    __table_args__ = (
+        UniqueConstraint("drive_id", "usn", name="uq_placement_outcome"),
+        CheckConstraint("outcome_status IN ('OFFER_MADE','OFFER_ACCEPTED','OFFER_DECLINED','REJECTED')", name="ck_placement_outcome_status"),
+        Index("ix_placement_outcome_usn_status", "usn", "outcome_status"),
+    )
+    id = Column(Integer, primary_key=True)
+    drive_id = Column(Integer, ForeignKey("placement_drives.id"), nullable=False)
+    usn = Column(String(16), ForeignKey("students.usn"), nullable=False)
+    outcome_status = Column(String(24), nullable=False)
+    package_offered = Column(Float, nullable=True)
+    decided_at = Column(DateTime, nullable=False, default=utcnow)
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class Notification(Base):
