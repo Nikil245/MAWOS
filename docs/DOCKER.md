@@ -45,7 +45,7 @@ docker compose config --quiet
 docker compose build
 docker compose up -d
 docker compose ps
-docker compose logs -f backend frontend
+docker compose logs -f backend frontend ollama
 ```
 
 No migration is run by these commands. The backend startup diagnostic reports
@@ -79,6 +79,9 @@ docker compose -f docker-compose.yml -f docker-compose.docker-db.yml ps
 Service URLs: frontend `http://localhost:3000`; backend health
 `http://localhost:8000/`; API documentation `http://localhost:8000/docs`.
 PostgreSQL is intentionally private to the Compose network.
+In Docker-database mode it uses a separate internal network shared only with
+the backend. Ollama remains on the application network and has no network path
+or credentials for PostgreSQL.
 
 The Docker database uses a persistent named volume, starts empty, and is not a
 copy of the existing host database. Backend waits for PostgreSQL health, then
@@ -119,18 +122,21 @@ use the reviewed project procedure (which may require `alembic stamp head`)
 rather than blindly upgrading. Never run migration commands automatically or
 against production without a backup and change approval.
 
-## Ollama (optional)
+## Ollama
 
-Ollama is disabled by default and MAWOS retains its deterministic safe fallback
-when unavailable. Enable it and pull the model explicitly:
+Ollama is a default service. `docker compose up -d` starts frontend, backend,
+and Ollama without a profile; backend waits for Ollama's health check before it
+starts. The named `ollama_data` volume persists downloaded models, and Ollama
+remains private to the Compose network. Pull the configured model explicitly
+after the first startup:
 
 ```bash
-docker compose --profile ollama up -d
-docker exec -it mawos-ollama-1 ollama pull qwen2.5:3b
+docker compose up -d
+docker compose exec ollama ollama pull qwen2.5:3b
 ```
 
-Use `docker compose ps` to confirm the actual container name if it differs.
-No model is downloaded by normal startup.
+Normal startup does not download a model. Until the configured model is
+available, MAWOS retains its deterministic safe fallback.
 
 ## Development and lifecycle
 

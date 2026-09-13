@@ -28,7 +28,7 @@ function defaults(_token, path, body) {
   if (path.includes('fines?')) return Promise.resolve({ items: [fine], total: 1 });
   return Promise.resolve({ items: [], total: 0 });
 }
-function student() { return render(<MemoryRouter initialEntries={['/student/library']}><Routes><Route path="/student/library" element={<StudentLibrary />} /><Route path="/student/library/slips/:reservationId" element={<LibrarySlip />} /></Routes></MemoryRouter>); }
+function student(initialEntry = '/student/library') { return render(<MemoryRouter initialEntries={[initialEntry]}><Routes><Route path="/student/library" element={<StudentLibrary />} /><Route path="/student/library/slips/:reservationId" element={<LibrarySlip />} /></Routes></MemoryRouter>); }
 
 describe('physical library UI', () => {
   beforeEach(() => { mocks.role = 'student'; mocks.request.mockReset().mockImplementation(defaults); mocks.download.mockReset().mockResolvedValue(); });
@@ -43,6 +43,14 @@ describe('physical library UI', () => {
     expect(mocks.request).toHaveBeenCalledWith('library-token', '/student/library/reservations', { book_id: 11 }, 'POST');
     fireEvent.click(screen.getByRole('button', { name: 'Download PDF slip' }));
     await waitFor(() => expect(mocks.download).toHaveBeenCalledWith('library-token', '21'));
+  });
+
+  it('opens an assistant catalogue link with its safe search term applied', async () => {
+    student('/student/library?q=Python%20Crash%20Course');
+    expect(await screen.findByLabelText('Search catalogue')).toHaveValue('Python Crash Course');
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledWith(
+      'library-token', expect.stringContaining('q=Python%20Crash%20Course'),
+    ));
   });
 
   it('cancels reservations and requests physical return with a plain text review', async () => {

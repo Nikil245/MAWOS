@@ -90,6 +90,33 @@ A batch commits each expired reservation independently, releases its copy, creat
 
 Schedule the Docker command every five minutes from the project directory using **one operator-managed cron entry or one dedicated worker**. No library scheduler runs in FastAPI startup or each backend container. Use an absolute working directory in cron; monitor its exit code and reported expired count.
 
+## Versioned catalogue import
+
+`data/library_catalogue_v1.json` contains 150 unique ISBN-13 catalogue entries and 1,110 physical copies. Each record retains its Open Library edition/work sources. Department codes are recommendation tags only; catalogue browsing and reservation remain available to every authenticated student.
+
+From an environment configured with the intended MAWOS PostgreSQL URL, preview the entire operation (the default mode) with:
+
+```bash
+.venv/bin/python scripts/import_library_catalogue.py --dry-run
+```
+
+Dry-run validates all records, starts a read-only PostgreSQL transaction, reports catalogue and database skip/add counts, and performs no DML. Review that report before applying. The live import is a separate, explicit operator action:
+
+```bash
+MAWOS_ALLOW_LIBRARY_CATALOGUE_IMPORT=true \
+  .venv/bin/python scripts/import_library_catalogue.py --apply
+```
+
+Apply inserts only ISBNs absent from `books`, creates only their department relevance rows, and commits the batch in one transaction. An existing ISBN is skipped without changing any of its fields or stock. Repeating apply therefore adds no duplicates. The script does not create borrowers, accounts, circulation records, fines, reviews, notifications, or any other data. It was not run against the live database during implementation.
+
+## Academic Assistant catalogue access
+
+Authenticated students can ask the Academic Assistant to find active books by title, author, ISBN, category, description keyword, or department relevance, and to report current copy availability. These requests are routed before general AI and execute a backend-owned read-only Library Agent query. Results contain catalogue metadata and stock only—never database IDs, borrower identities, reservations, issues, fines, payments, or credentials.
+
+Exact availability and search answers are rendered deterministically by FastAPI. For broad recommendations, FastAPI sends Ollama a short list of available books containing only an index, title, author, category, and available-copy count. Catalogue strings are marked as untrusted data, the original prompt is not included in that recommendation step, and Ollama may return only validated list indices. FastAPI renders the final titles and stock; invalid or unavailable model output falls back to deterministic catalogue results. Ollama has no database credentials or database network access.
+
+Assistant catalogue access is read-only and student-scoped. Reservations, holds, renewals, issues, returns, reviews, fine actions, catalogue edits, and information about other borrowers are not assistant capabilities. Students use `/student/library` for normal authorized library workflows.
+
 ## Exact browser acceptance checklist
 
 Use a separate authorized test/staging deployment with this migration applied, two student accounts, an admin, and a parent linked to only one of those students. This checklist is provided for operator acceptance; no live browser actions or live data setup were performed.

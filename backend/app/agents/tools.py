@@ -72,7 +72,8 @@ _ROLE_CAPABILITY_COPY = {
         "title": "Student academic assistant",
         "subtitle": "Your read-only records and grounded academic help",
         "description": ("You may ask about your own attendance, fees, internal marks, and "
-                        "hall-ticket eligibility and safe profile, approved MAWOS explanations, and general learning questions."),
+                        "hall-ticket eligibility and safe profile, search the read-only library catalogue, "
+                        "approved MAWOS explanations, and general learning questions."),
         "placeholder": "Ask about your academic information…",
         "record_group": "My records",
     },
@@ -150,6 +151,12 @@ def assistant_capabilities(role: str, display_name: str | None = None) -> dict:
     suggestion_groups = []
     if record_prompts:
         suggestion_groups.append({"label": copy["record_group"], "prompts": record_prompts})
+    if role == "student":
+        suggestion_groups.append({"label": "Library catalogue", "prompts": [
+            "Find available AIML books",
+            "Recommend a Python book from the library",
+            "Check a book's availability",
+        ]})
     suggestion_groups.extend([
         {"label": "MAWOS help", "prompts": mawos_prompts},
         {"label": "General learning", "prompts": general_prompts},

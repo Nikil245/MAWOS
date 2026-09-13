@@ -148,10 +148,13 @@ docker compose config --quiet
 docker compose build
 docker compose up -d
 docker compose ps
-docker compose logs -f backend frontend
+docker compose logs -f backend frontend ollama
 ```
 
-The Docker backend receives its Docker-safe URL; native Alembic/scripts continue to use the loopback URL.
+This starts frontend, backend, and Ollama; backend waits for Ollama health. The
+Docker backend receives Docker-safe database and Ollama URLs, while native
+Alembic/scripts continue to use loopback URLs. The Ollama model remains an
+explicit download (`docker compose exec ollama ollama pull qwen2.5:3b`).
 
 ### B. Fresh Docker PostgreSQL
 

@@ -6,6 +6,7 @@ cycles across books. Service functions stage writes; API/maintenance own commit.
 PostgreSQL READ COMMITTED is required for the concurrency guarantee.
 """
 import datetime as dt
+import re
 import secrets
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -108,6 +109,57 @@ def catalogue(db, q='', offset=0, limit=20, include_archived=False):
                                   (Book.title, Book.author, Book.isbn, Book.category))))
     return {'total': query.count(), 'items': [book_record(db, book) for book in
         query.order_by(func.lower(Book.title), Book.id).offset(offset).limit(limit)]}
+
+
+def assistant_catalogue_search(db, term, limit=12):
+    """Return ranked, active catalogue facts safe for student chat.
+
+    This deliberately has no circulation joins and exposes no database IDs,
+    borrower data, reviews, popularity, or mutation capability. Department
+    mappings improve discovery only; they never filter student visibility.
+    """
+    term = ' '.join(str(term or '').split())[:128]
+    if not term:
+        return []
+    lowered = term.casefold()
+    tokens = [token for token in re.findall(r'[a-z0-9+#.]+', lowered)
+              if len(token) > 1 and token not in {
+                  'the', 'and', 'for', 'book', 'books', 'learning', 'college', 'library'
+              }][:10]
+    searchable = (Book.title, Book.author, Book.isbn, Book.category, Book.description)
+    clauses = [column.icontains(term, autoescape=True) for column in searchable]
+    for token in tokens:
+        clauses.extend(column.icontains(token, autoescape=True) for column in searchable)
+        clauses.append(Book.id.in_(select(BookDepartment.book_id).where(
+            BookDepartment.department_code.ilike(token))))
+    rows = db.query(Book).filter(Book.is_active.is_(True), or_(*clauses)).limit(60).all()
+
+    def score(book):
+        values = {
+            'title': (book.title or '').casefold(), 'author': (book.author or '').casefold(),
+            'isbn': (book.isbn or '').casefold(), 'category': (book.category or '').casefold(),
+            'description': (book.description or '').casefold(),
+        }
+        exact = 1000 if lowered in {values['title'], values['isbn']} else 0
+        contains = (300 if lowered in values['title'] else 0) + (220 if lowered in values['author'] else 0)
+        contains += (180 if lowered in values['category'] else 0) + (80 if lowered in values['description'] else 0)
+        coverage = sum(30 for token in tokens if any(token in value for value in values.values()))
+        return exact + contains + coverage
+
+    rows.sort(key=lambda book: (-score(book), book.title.casefold(), book.id))
+    result = []
+    for book in rows[:limit]:
+        departments = [code for code, in db.query(BookDepartment.department_code).filter_by(
+            book_id=book.id).order_by(BookDepartment.department_code)]
+        result.append({
+            'title': book.title, 'author': book.author, 'isbn': book.isbn,
+            'publisher': book.publisher, 'category': book.category,
+            'description': book.description, 'departments': departments,
+            'total_copies': book.total_copies,
+            'available_copies': book.available_copies,
+            'availability_status': 'available' if book.available_copies > 0 else 'currently unavailable',
+        })
+    return result
 
 
 def reviews(db, book_id=None, offset=0, limit=20):

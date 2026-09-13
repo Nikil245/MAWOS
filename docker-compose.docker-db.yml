@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks: [mawos_internal]
+    networks: [mawos_database]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -26,8 +26,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks: [mawos_internal, mawos_database]
 
 volumes:
   postgres_data:
 
+networks:
+  mawos_database:
+    internal: true
 

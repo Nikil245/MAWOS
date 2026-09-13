@@ -14,10 +14,12 @@ ChatTopic = Literal[
 ChatCategory = Literal[
     "personal_record", "conversation", "institutional_faq", "clarification",
     "unsupported", "sensitive_or_disallowed", "general_ai", "department_record",
+    "library_catalogue",
 ]
 ChatSource = Literal[
     "Deterministic answer", "AI-grounded record answer", "General AI response",
     "Official MAWOS information", "Safe fallback", "Clarification",
+    "Library catalogue result", "Library-guided AI response",
 ]
 
 
@@ -116,6 +118,11 @@ class ChatToolUseResponse(BaseModel):
     ms: float = 0.0
 
 
+class ChatActionResponse(BaseModel):
+    label: str
+    route: str = Field(pattern=r"^/student/library(?:\?q=[^\s]*)?$")
+
+
 class ChatResponse(BaseModel):
     """Canonical read-only assistant result returned by ``POST /api/chat``."""
     text: str
@@ -135,6 +142,7 @@ class ChatResponse(BaseModel):
     # Retained for compatibility with existing lexicon callers. It is always
     # the same authorized, read-only result used to produce ``text``.
     data: dict[str, Any] | None = None
+    actions: list[ChatActionResponse] = Field(default_factory=list)
 
 
 class AssistantRecordCapabilityResponse(BaseModel):

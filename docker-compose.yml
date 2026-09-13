@@ -15,7 +15,9 @@ services:
       # receive the separate gateway URL only; Compose fails before startup
       # when external mode is selected without it.
       MAWOS_DATABASE_URL: ${MAWOS_DOCKER_DATABASE_URL:?set MAWOS_DOCKER_DATABASE_URL in .env for external Docker deployments}
-      MAWOS_OLLAMA_HOST: ${MAWOS_OLLAMA_HOST:-http://ollama:11434}
+      # Keep host-native Ollama configuration separate. The backend container
+      # reaches the default Ollama service over the private Compose network.
+      MAWOS_OLLAMA_HOST: ${MAWOS_DOCKER_OLLAMA_HOST:-http://ollama:11434}
       MAWOS_OLLAMA_MODEL: ${MAWOS_OLLAMA_MODEL:-qwen2.5:3b}
       MAWOS_OLLAMA_TIMEOUT: ${MAWOS_OLLAMA_TIMEOUT:-20}
       MAWOS_OLLAMA_CONTEXT: ${MAWOS_OLLAMA_CONTEXT:-2048}
@@ -37,6 +39,9 @@ services:
       MAWOS_PLACEMENT_DOCUMENT_MAX_BYTES: ${MAWOS_PLACEMENT_DOCUMENT_MAX_BYTES:-10485760}
     # External mode uses host.docker.internal. Docker mode adds the database
     # dependency only through docker-compose.docker-db.yml.
+    depends_on:
+      ollama:
+        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -72,7 +77,6 @@ services:
 
   ollama:
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
-    profiles: ["ollama"]
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama

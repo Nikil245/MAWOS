@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
@@ -77,7 +77,9 @@ function BookEditor({ book, save, busy, close }) {
 }
 
 function Catalogue({ staff = false, onChange }) {
-  const [search, setSearch] = useState(''), [query, setQuery] = useState(''), [offset, setOffset] = useState(0), [detail, setDetail] = useState(null), [editing, setEditing] = useState(null);
+  const [searchParams] = useSearchParams();
+  const initialQuery = (searchParams.get('q') || '').slice(0, 128);
+  const [search, setSearch] = useState(initialQuery), [query, setQuery] = useState(initialQuery), [offset, setOffset] = useState(0), [detail, setDetail] = useState(null), [editing, setEditing] = useState(null);
   const state = useLibrary(`/library/books?q=${encodeURIComponent(query)}&offset=${offset}&limit=${PAGE}&include_archived=${staff}`);
   const navigate = useNavigate(); const action = useAction(() => { state.reload(); onChange?.(); });
   const reserve = async id => { const result = await action.run('/student/library/reservations', { book_id: id }); if (result) navigate(`/student/library/slips/${result.id}`); };

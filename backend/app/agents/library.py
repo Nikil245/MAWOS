@@ -20,4 +20,5 @@ class LibraryAgent(BaseAgent):
     reject_return = staticmethod(service.reject_return)
     pay_fine = staticmethod(service.pay_fine)
     save_book = staticmethod(service.save_book)
+    search_catalogue = staticmethod(service.assistant_catalogue_search)
     recommendations = staticmethod(service.recommendations)

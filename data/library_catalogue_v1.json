@@ -1,0 +1,2700 @@
+{
+  "schema_version": 1,
+  "catalogue_id": "mawos-library-catalogue-v1",
+  "metadata_verified_on": "2026-09-13",
+  "metadata_provider": "Open Library edition and work records",
+  "notes": "ISBN-13 identifies the specific physical edition. Null published_date means the source edition record does not state a publication date; no value was invented.",
+  "expected": {
+    "distinct_titles": 150,
+    "physical_copies": 1110
+  },
+  "books": [
+    {
+      "group": "shared_foundation",
+      "isbn": "9780471889410",
+      "title": "Advanced Engineering Mathematics",
+      "author": "Erwin Kreyszig",
+      "publisher": "John Wiley & Sons Inc",
+      "edition": "5th ed.",
+      "published_date": "May 1983",
+      "category": "Engineering Mathematics",
+      "departments": [],
+      "description": "Engineering Mathematics foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7630577M",
+      "work_source": "https://openlibrary.org/works/OL1400344W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9788174091956",
+      "title": "Higher Engineering Mathematics",
+      "author": "B.S. Grewal",
+      "publisher": "Khanna Publishers",
+      "edition": "ISBN-13 edition",
+      "published_date": "2015",
+      "category": "Engineering Mathematics",
+      "departments": [],
+      "description": "Engineering Mathematics foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28367354M",
+      "work_source": "https://openlibrary.org/works/OL20937686W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780071167567",
+      "title": "Discrete Mathematics and Its Applications",
+      "author": "Kenneth H. Rosen",
+      "publisher": "McGraw-Hill",
+      "edition": "4. ed.",
+      "published_date": "1999",
+      "category": "Discrete Mathematics",
+      "departments": [],
+      "description": "Discrete Mathematics foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL27032708M",
+      "work_source": "https://openlibrary.org/works/OL31821W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780321656810",
+      "title": "A First Course in Probability",
+      "author": "Sheldon M. Ross",
+      "publisher": "Prentice Hall",
+      "edition": "ISBN-13 edition",
+      "published_date": "2009",
+      "category": "Statistics and Probability",
+      "departments": [],
+      "description": "Statistics and Probability foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26004710M",
+      "work_source": "https://openlibrary.org/works/OL17047555W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780123704832",
+      "title": "Introduction to Probability and Statistics for Engineers and Scientists",
+      "author": "Sheldon M. Ross",
+      "publisher": "Krieger Pub. Company",
+      "edition": "4th ed.",
+      "published_date": "2009",
+      "category": "Statistics and Probability",
+      "departments": [],
+      "description": "Statistics and Probability foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL22796633M",
+      "work_source": "https://openlibrary.org/works/OL65242W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9781319245009",
+      "title": "Technical Communication",
+      "author": "Mike Markel",
+      "publisher": "Bedford/St. Martin's",
+      "edition": "ISBN-13 edition",
+      "published_date": "Sep 11, 2020",
+      "category": "Technical Communication",
+      "departments": [],
+      "description": "Technical Communication foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL32719258M",
+      "work_source": "https://openlibrary.org/works/OL21136036W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780226833880",
+      "title": "The Craft of Research",
+      "author": "Wayne C. Booth, Gregory G. Colomb, Joseph M. Williams, Joseph Bizup",
+      "publisher": "University of Chicago Press",
+      "edition": "ISBN-13 edition",
+      "published_date": "2024",
+      "category": "Research Methodology",
+      "departments": [],
+      "description": "Research Methodology foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL50626255M",
+      "work_source": "https://openlibrary.org/works/OL1974014W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780321696861",
+      "title": "Sears and Zemansky's University Physics",
+      "author": "Hugh D. Young, Roger A. Freedman",
+      "publisher": "Addison-Wesley",
+      "edition": "13th ed.",
+      "published_date": "2012",
+      "category": "Engineering Physics",
+      "departments": [],
+      "description": "Engineering Physics foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL24881549M",
+      "work_source": "https://openlibrary.org/works/OL15976458W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9789352161317",
+      "title": "Engineering Chemistry",
+      "author": "P.C. Jain",
+      "publisher": "Dhanpat Rai Publishing Company (P) Ltd.",
+      "edition": "Sixteenth Edition",
+      "published_date": "2016",
+      "category": "Engineering Chemistry",
+      "departments": [],
+      "description": "Engineering Chemistry foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL61375239M",
+      "work_source": "https://openlibrary.org/works/OL44983824W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9788120352797",
+      "title": "Basic Electrical Engineering",
+      "author": "D. P. Kothari, I. J. Nagrath",
+      "publisher": "Prentice Hall India Pvt., Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2016",
+      "category": "Basic Electrical Engineering",
+      "departments": [],
+      "description": "Basic Electrical Engineering foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL37282274M",
+      "work_source": "https://openlibrary.org/works/OL27393685W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780521689175",
+      "title": "The Art of Electronics",
+      "author": "Paul Horowitz, Winfield Hill",
+      "publisher": "Cambridge University Press",
+      "edition": "ISBN-13 edition",
+      "published_date": "Jan 01, 2006",
+      "category": "Basic Electronics",
+      "departments": [],
+      "description": "Basic Electronics foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL39918631M",
+      "work_source": "https://openlibrary.org/works/OL4770496W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9788173715402",
+      "title": "Textbook of Environmental Studies for Undergraduate Courses",
+      "author": "Erach Bharucha",
+      "publisher": "Orient Blackswan",
+      "edition": "ISBN-13 edition",
+      "published_date": "Nov 15, 2005",
+      "category": "Environmental Studies",
+      "departments": [],
+      "description": "Environmental Studies foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL44089100M",
+      "work_source": "https://openlibrary.org/works/OL32336470W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9788131808559",
+      "title": "Engineering Mechanics",
+      "author": "Sanjay Bansal,Dr. R. K. Bansal",
+      "publisher": "Laxmi Publication",
+      "edition": "ISBN-13 edition",
+      "published_date": "Nov 21, 2010",
+      "category": "Engineering Mechanics",
+      "departments": [],
+      "description": "Engineering Mechanics foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL31402755M",
+      "work_source": "https://openlibrary.org/works/OL23583323W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9788120348165",
+      "title": "Professional Ethics and Human Values",
+      "author": "M. Govindarajan, S. Natarajan, V. S. Senthilkumar",
+      "publisher": "Prentice Hall India Pvt., Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2015",
+      "category": "Professional Ethics",
+      "departments": [],
+      "description": "Professional Ethics foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL37253342M",
+      "work_source": "https://openlibrary.org/works/OL27383562W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9789352534029",
+      "title": "Quantitative Aptitude for Competitive Examinations",
+      "author": "R. S. Aggarwal",
+      "publisher": "S. Chand Publishing",
+      "edition": "ISBN-13 edition",
+      "published_date": "Feb 21, 2017",
+      "category": "Aptitude and Reasoning",
+      "departments": [],
+      "description": "Aptitude and Reasoning foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28332690M",
+      "work_source": "https://openlibrary.org/works/OL20914388W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780534176884",
+      "title": "Logical Reasoning",
+      "author": "Bradley Harris Dowden",
+      "publisher": "Wadsworth Pub. Co.",
+      "edition": "ISBN-13 edition",
+      "published_date": "1993",
+      "category": "Aptitude and Reasoning",
+      "departments": [],
+      "description": "Aptitude and Reasoning foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL1706902M",
+      "work_source": "https://openlibrary.org/works/OL4280733W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780321544285",
+      "title": "Computer Science: An Overview",
+      "author": "J. Glenn Brookshear",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2008",
+      "category": "Programming Fundamentals",
+      "departments": [],
+      "description": "Programming Fundamentals foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29041254M",
+      "work_source": "https://openlibrary.org/works/OL21447182W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780136060604",
+      "title": "Problem Solving and Programming Concepts",
+      "author": "Maureen Sprankle",
+      "publisher": "Pearson/Prentice Hall",
+      "edition": "8th ed.",
+      "published_date": "2008",
+      "category": "Programming Fundamentals",
+      "departments": [],
+      "description": "Programming Fundamentals foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL18507324M",
+      "work_source": "https://openlibrary.org/works/OL1904027W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780619160234",
+      "title": "Programming Logic and Design",
+      "author": "Joyce Farrell",
+      "publisher": "Course Technology Ptr (Sd)",
+      "edition": "ISBN-13 edition",
+      "published_date": "January 2004",
+      "category": "Programming Fundamentals",
+      "departments": [],
+      "description": "Programming Fundamentals foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7607070M",
+      "work_source": "https://openlibrary.org/works/OL3503669W"
+    },
+    {
+      "group": "shared_foundation",
+      "isbn": "9780691023564",
+      "title": "How to Solve It",
+      "author": "George Pólya",
+      "publisher": "Princeton University Press",
+      "edition": "ISBN-13 edition",
+      "published_date": "November 1, 1988",
+      "category": "Problem Solving",
+      "departments": [],
+      "description": "Problem Solving foundation for engineering students across all departments.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7756645M",
+      "work_source": "https://openlibrary.org/works/OL4569830W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9780133414240",
+      "title": "C Programming Absolute Beginner's Guide",
+      "author": "Greg Perry",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2013",
+      "category": "C Programming",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical C Programming reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL34787122M",
+      "work_source": "https://openlibrary.org/works/OL20720686W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9780321714114",
+      "title": "C++ Primer",
+      "author": "Stanley B. Lippman",
+      "publisher": "Addison-Wesley",
+      "edition": "5th ed.",
+      "published_date": "2013",
+      "category": "C++ Programming",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical C++ Programming reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL25371949M",
+      "work_source": "https://openlibrary.org/works/OL1836494W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781530445387",
+      "title": "Effective Modern C++",
+      "author": "Scott Meyers",
+      "publisher": "CreateSpace Independent Publishing Platform",
+      "edition": "ISBN-13 edition",
+      "published_date": "2016",
+      "category": "C++ Programming",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical C++ Programming reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL55787945M",
+      "work_source": "https://openlibrary.org/works/OL27073233W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781491910771",
+      "title": "Head First Java",
+      "author": "Kathy Sierra",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2022",
+      "category": "Java Programming",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Java Programming reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL34193104M",
+      "work_source": "https://openlibrary.org/works/OL5756124W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9780134685991",
+      "title": "Effective Java",
+      "author": "Joshua Bloch",
+      "publisher": "Addison-Wesley Professional",
+      "edition": "3rd Edition",
+      "published_date": "December 27, 2017",
+      "category": "Java Programming",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Java Programming reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL31838212M",
+      "work_source": "https://openlibrary.org/works/OL6223299W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781593276034",
+      "title": "Python Crash Course",
+      "author": "Eric Matthes",
+      "publisher": "No Starch Press",
+      "edition": "ISBN-13 edition",
+      "published_date": "2015",
+      "category": "Python Programming",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Python Programming reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26494240M",
+      "work_source": "https://openlibrary.org/works/OL17920482W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781491946268",
+      "title": "Fluent Python",
+      "author": "Luciano Ramalho",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2015",
+      "category": "Python Programming",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Python Programming reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL36803974M",
+      "work_source": "https://openlibrary.org/works/OL19932156W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781718504103",
+      "title": "Eloquent JavaScript",
+      "author": "Marijn Haverbeke",
+      "publisher": "No Starch Press, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2024",
+      "category": "JavaScript",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical JavaScript reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL53368054M",
+      "work_source": "https://openlibrary.org/works/OL15444205W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781647862251",
+      "title": "You Don't Know JS Yet",
+      "author": "Kyle Simpson",
+      "publisher": "Primedia eLaunch LLC",
+      "edition": "ISBN-13 edition",
+      "published_date": "2020",
+      "category": "JavaScript",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical JavaScript reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL36818452M",
+      "work_source": "https://openlibrary.org/works/OL27032590W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781492053743",
+      "title": "Effective TypeScript",
+      "author": "Dan Vanderkam",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2019",
+      "category": "TypeScript",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical TypeScript reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29447946M",
+      "work_source": "https://openlibrary.org/works/OL21655070W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781449333362",
+      "title": "Learning Web Design",
+      "author": "Jennifer Niederst Robbins",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2007",
+      "category": "Web Development",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Web Development reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL36797477M",
+      "work_source": "https://openlibrary.org/works/OL19882567W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781617293450",
+      "title": "CSS in Depth",
+      "author": "Keith J. Grant",
+      "publisher": "Manning Publications",
+      "edition": "ISBN-13 edition",
+      "published_date": "Apr 07, 2018",
+      "category": "Web Development",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Web Development reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26833636M",
+      "work_source": "https://openlibrary.org/works/OL19542937W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781306814881",
+      "title": "Learning SQL",
+      "author": "Alan Beaulieu",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2009",
+      "category": "Databases",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Databases reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL36715224M",
+      "work_source": "https://openlibrary.org/works/OL19882532W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9780596009762",
+      "title": "SQL Cookbook",
+      "author": "Anthony Molinaro",
+      "publisher": "O'Reilly Media, Inc.",
+      "edition": "ISBN-13 edition",
+      "published_date": "December 16, 2005",
+      "category": "Databases",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Databases reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7581236M",
+      "work_source": "https://openlibrary.org/works/OL8167532W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781492051725",
+      "title": "Learning React",
+      "author": "Alex Banks, Eve Porcello",
+      "publisher": "O'Reilly Media",
+      "edition": "ISBN-13 edition",
+      "published_date": "Jun 30, 2020",
+      "category": "React",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical React reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28334018M",
+      "work_source": "https://openlibrary.org/works/OL20915214W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781728995557",
+      "title": "Fullstack React",
+      "author": "Houssein Djirdeh, Anthony Accomazzo, Sophia Shoemaker",
+      "publisher": "Independently Published",
+      "edition": "ISBN-13 edition",
+      "published_date": "2019",
+      "category": "Full-Stack Development",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Full-Stack Development reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL41109625M",
+      "work_source": "https://openlibrary.org/works/OL29898642W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781839210440",
+      "title": "Node.js Design Patterns",
+      "author": "Mario Casciaro, Luciano Mammino",
+      "publisher": "de Gruyter GmbH, Walter",
+      "edition": "ISBN-13 edition",
+      "published_date": "2020",
+      "category": "Node.js",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Node.js reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL51794398M",
+      "work_source": "https://openlibrary.org/works/OL22157438W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781638353317",
+      "title": "Express in Action",
+      "author": "Evan Hahn",
+      "publisher": "Manning Publications Co. LLC",
+      "edition": "ISBN-13 edition",
+      "published_date": "2016",
+      "category": "Express.js",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Express.js reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL34983238M",
+      "work_source": "https://openlibrary.org/works/OL24218478W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9789350042090",
+      "title": "Spring in Action",
+      "author": "Craig Walls, Ryan Breidenbach",
+      "publisher": "WILEY",
+      "edition": "ISBN-13 edition",
+      "published_date": "May 08, 2011",
+      "category": "Spring Boot",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Spring Boot reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL32345734M",
+      "work_source": "https://openlibrary.org/works/OL8955978W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9780672329166",
+      "title": "PHP and MySQL Web Development",
+      "author": "Luke Welling",
+      "publisher": "Sams Pub.",
+      "edition": "4th ed.",
+      "published_date": "2008",
+      "category": "PHP",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical PHP reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL18736793M",
+      "work_source": "https://openlibrary.org/works/OL6038730W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781548889807",
+      "title": "Pro Git",
+      "author": "Scott Chacon, Ben Straub",
+      "publisher": "CreateSpace Independent Publishing Platform",
+      "edition": "ISBN-13 edition",
+      "published_date": "2017",
+      "category": "Git and GitHub",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Git and GitHub reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL55631566M",
+      "work_source": "https://openlibrary.org/works/OL16310859W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9781492026921",
+      "title": "Designing Web APIs",
+      "author": "Brenda Jin, Saurabh Sahni, Amir Shevat",
+      "publisher": "O'Reilly Media",
+      "edition": "ISBN-13 edition",
+      "published_date": "Sep 20, 2018",
+      "category": "REST APIs",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical REST APIs reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26833047M",
+      "work_source": "https://openlibrary.org/works/OL19542342W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9780672319839",
+      "title": "Software Testing",
+      "author": "Ron Patton",
+      "publisher": "Sams",
+      "edition": "ISBN-13 edition",
+      "published_date": "November 7, 2000",
+      "category": "Software Testing",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Software Testing reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7668258M",
+      "work_source": "https://openlibrary.org/works/OL7955825W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9780133052664",
+      "title": "Design Patterns",
+      "author": "Erich Gamma, John Vlissides, Richard Helm, Ralph Johnson",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2024",
+      "category": "Software Design",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Software Design reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL62107025M",
+      "work_source": "https://openlibrary.org/works/OL6030812W"
+    },
+    {
+      "group": "programming_software_fullstack",
+      "isbn": "9780134706054",
+      "title": "Android Programming: The Big Nerd Ranch Guide",
+      "author": "Bill Phillips, Chris Stewart, Kristin Marsicano",
+      "publisher": "Big Nerd Ranch Guides",
+      "edition": "ISBN-13 edition",
+      "published_date": "Feb 09, 2017",
+      "category": "Mobile Development",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Practical Mobile Development reference for coursework, labs, and student projects.",
+      "total_copies": 10,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26834154M",
+      "work_source": "https://openlibrary.org/works/OL19543466W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9781118021712",
+      "title": "Cloud Computing Bible",
+      "author": "Barrie Sosinsky",
+      "publisher": "Wiley & Sons, Incorporated, John",
+      "edition": "ISBN-13 edition",
+      "published_date": "2010",
+      "category": "Cloud Computing",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current Cloud Computing concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29058770M",
+      "work_source": "https://openlibrary.org/works/OL21457141W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9781119560395",
+      "title": "AWS Certified Solutions Architect Study Guide",
+      "author": "Ben Piper, David Clinton",
+      "publisher": "Wiley & Sons, Limited, John",
+      "edition": "ISBN-13 edition",
+      "published_date": "2019",
+      "category": "AWS",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current AWS concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL39937397M",
+      "work_source": "https://openlibrary.org/works/OL20520740W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9780135732182",
+      "title": "Exam Ref AZ-900 Microsoft Azure Fundamentals",
+      "author": "Jim Cheshire",
+      "publisher": "Pearson Education",
+      "edition": "ISBN-13 edition",
+      "published_date": "2019",
+      "category": "Microsoft Azure",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current Microsoft Azure concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28720305M",
+      "work_source": "https://openlibrary.org/works/OL21207885W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9781119564409",
+      "title": "Official Google Cloud Certified Associate Cloud Engineer Study Guide",
+      "author": "Dan Sullivan",
+      "publisher": "Wiley & Sons, Limited, John",
+      "edition": "ISBN-13 edition",
+      "published_date": "2019",
+      "category": "Google Cloud",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current Google Cloud concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL38309911M",
+      "work_source": "https://openlibrary.org/works/OL25229333W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9781521822807",
+      "title": "Docker Deep Dive",
+      "author": "Nigel Poulton",
+      "publisher": "Independently published",
+      "edition": "ISBN-13 edition",
+      "published_date": "Jul 12, 2017",
+      "category": "Docker",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current Docker concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29095181M",
+      "work_source": "https://openlibrary.org/works/OL21474887W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9781492046530",
+      "title": "Kubernetes: Up and Running",
+      "author": "Brendan Burns, Joe Beda, Kelsey Hightower",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2019",
+      "category": "Kubernetes",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current Kubernetes concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28939482M",
+      "work_source": "https://openlibrary.org/works/OL21364155W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9781950508402",
+      "title": "The DevOps Handbook",
+      "author": "Gene Kim",
+      "publisher": "IT Revolution Press",
+      "edition": "Second edition",
+      "published_date": "30.11.2021",
+      "category": "DevOps",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current DevOps concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL52942646M",
+      "work_source": "https://openlibrary.org/works/OL19730495W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9780134855318",
+      "title": "Continuous Delivery",
+      "author": "Jez Humble, David Farley",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2019",
+      "category": "CI/CD",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current CI/CD concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL35585014M",
+      "work_source": "https://openlibrary.org/works/OL16420058W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9781119369141",
+      "title": "Cybersecurity Essentials",
+      "author": "Charles J. Brooks, Christopher Grow, Philip Craig, Donald Short",
+      "publisher": "Wiley & Sons, Limited, John",
+      "edition": "ISBN-13 edition",
+      "published_date": "2018",
+      "category": "Cybersecurity",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current Cybersecurity concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL33576185M",
+      "work_source": "https://openlibrary.org/works/OL19544528W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9788126533404",
+      "title": "The Web Application Hacker's Handbook",
+      "author": "Dafydd Stuttard, Marcus Pinto",
+      "publisher": "Wiley",
+      "edition": "ISBN-13 edition",
+      "published_date": "2011",
+      "category": "Ethical Hacking",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current Ethical Hacking concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL50509771M",
+      "work_source": "https://openlibrary.org/works/OL13814659W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9781839211379",
+      "title": "Mastering Blockchain",
+      "author": "Imran Bashir",
+      "publisher": "de Gruyter GmbH, Walter",
+      "edition": "ISBN-13 edition",
+      "published_date": "2020",
+      "category": "Blockchain",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current Blockchain concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL54006930M",
+      "work_source": "https://openlibrary.org/works/OL17802010W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9781119055259",
+      "title": "Storytelling with Data",
+      "author": "Cole Nussbaumer Knaflic",
+      "publisher": "Wiley & Sons, Limited, John",
+      "edition": "ISBN-13 edition",
+      "published_date": "2015",
+      "category": "Data Analytics",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Current Data Analytics concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL38728809M",
+      "work_source": "https://openlibrary.org/works/OL17659741W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9780321965516",
+      "title": "Don't Make Me Think, Revisited",
+      "author": "Steve Krug",
+      "publisher": "Pearson Education",
+      "edition": "ISBN-13 edition",
+      "published_date": "2014",
+      "category": "UI/UX",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current UI/UX concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28651286M",
+      "work_source": "https://openlibrary.org/works/OL21163225W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9781449373320",
+      "title": "Designing Data-Intensive Applications",
+      "author": "Martin Kleppmann",
+      "publisher": "O'Reilly Media",
+      "edition": "ISBN-13 edition",
+      "published_date": "Apr 02, 2017",
+      "category": "System Design",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Current System Design concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26780701M",
+      "work_source": "https://openlibrary.org/works/OL19293745W"
+    },
+    {
+      "group": "emerging_technology",
+      "isbn": "9780521116398",
+      "title": "The Quest for Artificial Intelligence",
+      "author": "Nilsson, Nils J.",
+      "publisher": "Cambridge University Press",
+      "edition": "ISBN-13 edition",
+      "published_date": "2010",
+      "category": "Artificial Intelligence",
+      "departments": [
+        "AIML",
+        "CSE"
+      ],
+      "description": "Current Artificial Intelligence concepts and professional practice for technology-focused study.",
+      "total_copies": 8,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL24013083M",
+      "work_source": "https://openlibrary.org/works/OL16962439W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781493938438",
+      "title": "Pattern Recognition and Machine Learning",
+      "author": "Christopher M. Bishop",
+      "publisher": "Springer",
+      "edition": "ISBN-13 edition",
+      "published_date": "Aug 23, 2016",
+      "category": "Machine Learning",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Machine Learning core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28032754M",
+      "work_source": "https://openlibrary.org/works/OL20728101W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781098122478",
+      "title": "Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow",
+      "author": "Aurélien Géron",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2022",
+      "category": "Machine Learning",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Machine Learning core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL40322335M",
+      "work_source": "https://openlibrary.org/works/OL20709638W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9780262035613",
+      "title": "Deep Learning",
+      "author": "Ian Goodfellow, Yoshua Bengio, Aaron Courville, Francis Bach",
+      "publisher": "MIT Press",
+      "edition": "ISBN-13 edition",
+      "published_date": "2017",
+      "category": "Deep Learning",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Deep Learning core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26391361M",
+      "work_source": "https://openlibrary.org/works/OL17801809W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781633436589",
+      "title": "Deep Learning with Python",
+      "author": "Francois Chollet, Matthew Watson, Matthew Watson",
+      "publisher": "Manning Publications Co. LLC",
+      "edition": "ISBN-13 edition",
+      "published_date": "2025",
+      "category": "Deep Learning",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Deep Learning core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL60896630M",
+      "work_source": "https://openlibrary.org/works/OL19541947W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781449319793",
+      "title": "Python for Data Analysis",
+      "author": "Wes McKinney",
+      "publisher": "O'Reilly Media",
+      "edition": "ISBN-13 edition",
+      "published_date": "2012",
+      "category": "Data Science",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Data Science core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26005473M",
+      "work_source": "https://openlibrary.org/works/OL17422847W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781491904398",
+      "title": "Data Science from Scratch",
+      "author": "Joel Grus",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2015",
+      "category": "Data Science",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Data Science core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL34023376M",
+      "work_source": "https://openlibrary.org/works/OL20006690W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781292025438",
+      "title": "Speech and Language Processing",
+      "author": "Dan Jurafsky, Daniel Jurafsky, James H. Martin",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2013",
+      "category": "Natural Language Processing",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Natural Language Processing core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29172416M",
+      "work_source": "https://openlibrary.org/works/OL76830W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781491913420",
+      "title": "Natural Language Processing with Python",
+      "author": "Edward Loper, Steven Bird, Ewan Klein",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2017",
+      "category": "Natural Language Processing",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Natural Language Processing core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL36728486M",
+      "work_source": "https://openlibrary.org/works/OL14940051W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781107011793",
+      "title": "Computer Vision: Models, Learning, and Inference",
+      "author": "Simon J. D. Prince",
+      "publisher": "Cambridge University Press",
+      "edition": "ISBN-13 edition",
+      "published_date": "2014",
+      "category": "Computer Vision",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Computer Vision core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26501782M",
+      "work_source": "https://openlibrary.org/works/OL17929718W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781491937990",
+      "title": "Learning OpenCV 3",
+      "author": "Adrian Kaehler, Gary Bradski",
+      "publisher": "O'Reilly Media",
+      "edition": "ISBN-13 edition",
+      "published_date": "Jan 08, 2017",
+      "category": "Computer Vision",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Computer Vision core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26836895M",
+      "work_source": "https://openlibrary.org/works/OL19546306W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781492083290",
+      "title": "Introducing MLOps",
+      "author": "Mark Treveil, Nicolas Omont, Clément Stenac, Kenji Lefevre",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2020",
+      "category": "MLOps",
+      "departments": [
+        "AIML"
+      ],
+      "description": "MLOps core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL34754461M",
+      "work_source": "https://openlibrary.org/works/OL25788649W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781098102968",
+      "title": "Practical MLOps",
+      "author": "Noah Gift, Alfredo Deza",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2021",
+      "category": "MLOps",
+      "departments": [
+        "AIML"
+      ],
+      "description": "MLOps core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL35580386M",
+      "work_source": "https://openlibrary.org/works/OL25327798W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9780128042915",
+      "title": "Data Mining: Practical Machine Learning Tools and Techniques",
+      "author": "Ian H. Witten",
+      "publisher": "Morgan Kaufmann",
+      "edition": "ISBN-13 edition",
+      "published_date": "2017",
+      "category": "Data Mining",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Data Mining core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26391267M",
+      "work_source": "https://openlibrary.org/works/OL17801720W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9780321464491",
+      "title": "Introduction to Data Mining",
+      "author": "Pang-Ning Tan, Michael Steinbach, Vipin Kumar",
+      "publisher": "Pearson Education",
+      "edition": "ISBN-13 edition",
+      "published_date": "Apr 04, 2006",
+      "category": "Data Mining",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Data Mining core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL32176673M",
+      "work_source": "https://openlibrary.org/works/OL20999884W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781681732138",
+      "title": "Algorithms for Reinforcement Learning",
+      "author": "Csaba Szepesvari",
+      "publisher": "Morgan & Claypool Publishers",
+      "edition": "ISBN-13 edition",
+      "published_date": "2010",
+      "category": "Reinforcement Learning",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Reinforcement Learning core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL37284554M",
+      "work_source": "https://openlibrary.org/works/OL27394907W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781282645820",
+      "title": "Neural Networks and Learning Machines",
+      "author": "Simon Haykin",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2009",
+      "category": "Neural Networks",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Neural Networks core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29220410M",
+      "work_source": "https://openlibrary.org/works/OL21438045W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9781108751315",
+      "title": "Mining of Massive Datasets",
+      "author": "Anand Rajaraman, Jeffrey D. Ullman, Jure Leskovec",
+      "publisher": "Cambridge University Press",
+      "edition": "ISBN-13 edition",
+      "published_date": "2020",
+      "category": "Big Data",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Big Data core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL54005830M",
+      "work_source": "https://openlibrary.org/works/OL16970048W"
+    },
+    {
+      "group": "department_core_AIML",
+      "isbn": "9789352137060",
+      "title": "Spark: The Definitive Guide",
+      "author": "Matei Zaharia and Bill Chambers",
+      "publisher": "shroff,o'reilly",
+      "edition": "ISBN-13 edition",
+      "published_date": "Sep 11, 2018",
+      "category": "Big Data",
+      "departments": [
+        "AIML"
+      ],
+      "description": "Big Data core reference. Recommended for AIML Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL32351185M",
+      "work_source": "https://openlibrary.org/works/OL24424472W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780321397331",
+      "title": "Data Structures and Algorithm Analysis in C",
+      "author": "Mark Allen Weiss",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2005",
+      "category": "Data Structures",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Data Structures core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28981089M",
+      "work_source": "https://openlibrary.org/works/OL1958932W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780321573513",
+      "title": "Algorithms",
+      "author": "Robert Sedgewick",
+      "publisher": "Addison-Wesley",
+      "edition": "4th ed.",
+      "published_date": "2011",
+      "category": "Algorithms",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Algorithms core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL25004213M",
+      "work_source": "https://openlibrary.org/works/OL16116506W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9781423724605",
+      "title": "Introduction to Algorithms",
+      "author": "Thomas H. Cormen, Charles E. Leiserson, Ronald L. Rivest, Clifford Stein",
+      "publisher": "MIT Press",
+      "edition": "ISBN-13 edition",
+      "published_date": "2001",
+      "category": "Algorithms",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Algorithms core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL53283895M",
+      "work_source": "https://openlibrary.org/works/OL4781294W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9788178081373",
+      "title": "Fundamentals of Database Systems",
+      "author": "Ramez Elmasri, Shamkant B. Navathe",
+      "publisher": "Pearson Education",
+      "edition": "3rd ed.",
+      "published_date": "2000",
+      "category": "DBMS",
+      "departments": [
+        "CSE"
+      ],
+      "description": "DBMS core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL32353921M",
+      "work_source": "https://openlibrary.org/works/OL3947220W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780078022159",
+      "title": "Database System Concepts",
+      "author": "Abraham Silberschatz",
+      "publisher": "McGraw-Hill Education",
+      "edition": "Seventh edition",
+      "published_date": "Feb 19, 2019",
+      "category": "DBMS",
+      "departments": [
+        "CSE"
+      ],
+      "description": "DBMS core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29316583M",
+      "work_source": "https://openlibrary.org/works/OL1854539W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9781118063330",
+      "title": "Operating System Concepts",
+      "author": "Abraham Silberschatz",
+      "publisher": "Wiley",
+      "edition": "ISBN-13 edition",
+      "published_date": "2013",
+      "category": "Operating Systems",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Operating Systems core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL25624511M",
+      "work_source": "https://openlibrary.org/works/OL1854541W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780137618842",
+      "title": "Modern Operating Systems",
+      "author": "Andrew S. Tanenbaum, Herbert Bos",
+      "publisher": "Pearson Education",
+      "edition": "ISBN-13 edition",
+      "published_date": "2022",
+      "category": "Operating Systems",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Operating Systems core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL42806167M",
+      "work_source": "https://openlibrary.org/works/OL1970688W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780135429334",
+      "title": "Computer Networking: A Top-Down Approach",
+      "author": "James Kurose, Keith Ross",
+      "publisher": "Pearson Education",
+      "edition": "ISBN-13 edition",
+      "published_date": "2025",
+      "category": "Computer Networks",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Computer Networks core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL62112655M",
+      "work_source": "https://openlibrary.org/works/OL45032796W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780070499355",
+      "title": "Data Communications and Networking",
+      "author": "Behrouz A. Forouzan, Catherine Ann Coombs, Sophia Chung Fegan",
+      "publisher": "Tata McGraw Hill Education Private",
+      "edition": "2nd ed. update.",
+      "published_date": "2003",
+      "category": "Computer Networks",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Computer Networks core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL32829389M",
+      "work_source": "https://openlibrary.org/works/OL35531W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9781292096131",
+      "title": "Software Engineering",
+      "author": "Ian Sommerville, Sommerville, Ian., Ian Sommerville",
+      "publisher": "Pearson",
+      "edition": "ISBN-13 edition",
+      "published_date": "2016",
+      "category": "Software Engineering",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Software Engineering core reference. Recommended for CSE Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26500811M",
+      "work_source": "https://openlibrary.org/works/OL2960016W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780077227807",
+      "title": "Software Engineering: A Practitioner's Approach",
+      "author": "Roger S. Pressman",
+      "publisher": "McGraw-Hill Science/Engineering/Math",
+      "edition": "ISBN-13 edition",
+      "published_date": "2005-01-01",
+      "category": "Software Engineering",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Software Engineering core reference. Recommended for CSE Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL43717184M",
+      "work_source": "https://openlibrary.org/works/OL32001593W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9789357054119",
+      "title": "Compilers: Principles, Techniques, and Tools",
+      "author": "Alfred V. Aho, Monica S. Lam, Ravi Sethi, Jeffrey D. Ullman",
+      "publisher": "Pearson India",
+      "edition": "Updated Second Edition",
+      "published_date": "2023",
+      "category": "Compiler Design",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Compiler Design core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL59750369M",
+      "work_source": "https://openlibrary.org/works/OL3509433W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780321210296",
+      "title": "Introduction to Automata Theory, Languages, and Computation",
+      "author": "John E. Hopcroft, Jeffrey D. Ullman, Rajeev Motwani",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2003",
+      "category": "Theory of Computation",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Theory of Computation core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28965127M",
+      "work_source": "https://openlibrary.org/works/OL6816375W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9781098156350",
+      "title": "Designing Distributed Systems",
+      "author": "Brendan Burns",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2024",
+      "category": "Distributed Systems",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Distributed Systems core reference. Recommended for CSE Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL57541938M",
+      "work_source": "https://openlibrary.org/works/OL42410596W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9788120322158",
+      "title": "Distributed Systems: Principles and Paradigms",
+      "author": "Andrew S Tanenbaum and Maarten van Steen",
+      "publisher": "Prentice Hall India",
+      "edition": "ISBN-13 edition",
+      "published_date": "Nov 16, 2008",
+      "category": "Distributed Systems",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Distributed Systems core reference. Recommended for CSE Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL40445150M",
+      "work_source": "https://openlibrary.org/works/OL29403952W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780134444284",
+      "title": "Cryptography and Network Security",
+      "author": "William Stallings",
+      "publisher": "Pearson",
+      "edition": "ISBN-13 edition",
+      "published_date": "Mar 05, 2016",
+      "category": "Information Security",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Information Security core reference. Recommended for CSE Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28219449M",
+      "work_source": "https://openlibrary.org/works/OL18156276W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780134494166",
+      "title": "Clean Architecture",
+      "author": "Robert C. Martin",
+      "publisher": "Pearson",
+      "edition": "1st Edition",
+      "published_date": "September 10, 2017",
+      "category": "Software Engineering",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Software Engineering core reference. Recommended for CSE Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL31838215M",
+      "work_source": "https://openlibrary.org/works/OL19809141W"
+    },
+    {
+      "group": "department_core_CSE",
+      "isbn": "9780128203316",
+      "title": "Computer Organization and Design RISC-V Edition",
+      "author": "David A. Patterson, John L. Hennessy",
+      "publisher": "Elsevier Science & Technology",
+      "edition": "RISC-V Edition, 2. Edition",
+      "published_date": "2021",
+      "category": "Computer Architecture",
+      "departments": [
+        "CSE"
+      ],
+      "description": "Computer Architecture core reference. Recommended for CSE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL34678453M",
+      "work_source": "https://openlibrary.org/works/OL20842376W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780072866117",
+      "title": "Engineering Circuit Analysis",
+      "author": "William Hart Hayt",
+      "publisher": "McGraw-Hill Higher Education",
+      "edition": "7th ed.",
+      "published_date": "2006",
+      "category": "Circuit Theory",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Circuit Theory core reference. Recommended for ECE Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL3417669M",
+      "work_source": "https://openlibrary.org/works/OL4309679W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780073048352",
+      "title": "Fundamentals of Electric Circuits",
+      "author": "Charles K. Alexander, Matthew N. O. Sadiku, Charles Alexander, Matthew Sadiku",
+      "publisher": "McGraw-Hill Science/Engineering/Math",
+      "edition": "ISBN-13 edition",
+      "published_date": "May 26, 2004",
+      "category": "Circuit Theory",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Circuit Theory core reference. Recommended for ECE Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7306771M",
+      "work_source": "https://openlibrary.org/works/OL5850081W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780132340434",
+      "title": "Digital Design",
+      "author": "M. Morris Mano",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2008",
+      "category": "Digital Electronics",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Digital Electronics core reference. Recommended for ECE Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29026114M",
+      "work_source": "https://openlibrary.org/works/OL11309881W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780023385025",
+      "title": "Digital Fundamentals",
+      "author": "Thomas L. Floyd",
+      "publisher": "Merrill Pub Co",
+      "edition": "5th edition",
+      "published_date": "January 1994",
+      "category": "Digital Electronics",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Digital Electronics core reference. Recommended for ECE Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL9220556M",
+      "work_source": "https://openlibrary.org/works/OL473595W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780199339136",
+      "title": "Microelectronic Circuits",
+      "author": "Adel S. Sedra, Kenneth C. Smith",
+      "publisher": "Oxford University Press\t",
+      "edition": "ISBN-13 edition",
+      "published_date": "2014\t",
+      "category": "Analog Electronics",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Analog Electronics core reference. Recommended for ECE Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26367431M",
+      "work_source": "https://openlibrary.org/works/OL17770472W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780132505567",
+      "title": "Electronic Devices and Circuit Theory",
+      "author": "Robert L. Boylestad, Louis Nashelsky",
+      "publisher": "Prentice Hall",
+      "edition": "4Rev Ed edition",
+      "published_date": "December 1986",
+      "category": "Analog Electronics",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Analog Electronics core reference. Recommended for ECE Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL9294772M",
+      "work_source": "https://openlibrary.org/works/OL1904074W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780471401827",
+      "title": "Communication Systems",
+      "author": "Simon Haykin",
+      "publisher": "John Wiley & Sons Inc",
+      "edition": "4Rev Ed edition",
+      "published_date": "August 20, 2001",
+      "category": "Communication Systems",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Communication Systems core reference. Recommended for ECE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL10311730M",
+      "work_source": "https://openlibrary.org/works/OL7944255W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780070629233",
+      "title": "Principles of Communication Systems",
+      "author": "Herbert Taub",
+      "publisher": "McGraw-Hill",
+      "edition": "ISBN-13 edition",
+      "published_date": "1970",
+      "category": "Communication Systems",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Communication Systems core reference. Recommended for ECE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL5314189M",
+      "work_source": "https://openlibrary.org/works/OL5095491W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780132067096",
+      "title": "Discrete-Time Signal Processing",
+      "author": "Alan V. Oppenheim, Ronald Schafer",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2009",
+      "category": "Digital Signal Processing",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Digital Signal Processing core reference. Recommended for ECE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29012680M",
+      "work_source": "https://openlibrary.org/works/OL3270902W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780131873742",
+      "title": "Digital Signal Processing",
+      "author": "John G. Proakis, Dimitris K Manolakis",
+      "publisher": "Prentice Hall",
+      "edition": "ISBN-13 edition",
+      "published_date": "March 28, 2006",
+      "category": "Digital Signal Processing",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Digital Signal Processing core reference. Recommended for ECE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7338337M",
+      "work_source": "https://openlibrary.org/works/OL2706142W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9788187972099",
+      "title": "Microprocessor Architecture, Programming, and Applications with the 8085",
+      "author": "Ramesh S. Gaonkar",
+      "publisher": "Penram International Pub.",
+      "edition": "5th ed.",
+      "published_date": "2002",
+      "category": "Microprocessors",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Microprocessors core reference. Recommended for ECE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26335215M",
+      "work_source": "https://openlibrary.org/works/OL1983429W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780138610227",
+      "title": "The 8051 Microcontroller and Embedded Systems",
+      "author": "Muhammad ali mazidi, Janice Mazidi, Rolin McKinlay, Khadim Ullah Jan",
+      "publisher": "Prentice Hall",
+      "edition": "ISBN-13 edition",
+      "published_date": "November 11, 1999",
+      "category": "Microcontrollers",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Microcontrollers core reference. Recommended for ECE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7344720M",
+      "work_source": "https://openlibrary.org/works/OL2062593W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9781098151546",
+      "title": "Making Embedded Systems",
+      "author": "Elecia White",
+      "publisher": "O'Reilly Media, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2024",
+      "category": "Embedded Systems",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Embedded Systems core reference. Recommended for ECE Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL50626317M",
+      "work_source": "https://openlibrary.org/works/OL17470690W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9788177585681",
+      "title": "CMOS VLSI Design",
+      "author": "Neil H. E. Weste, Neil Weste, David Money Harris",
+      "publisher": "Pearson Education",
+      "edition": "3rd ed.",
+      "published_date": "2006",
+      "category": "VLSI",
+      "departments": [
+        "ECE"
+      ],
+      "description": "VLSI core reference. Recommended for ECE Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL39197350M",
+      "work_source": "https://openlibrary.org/works/OL4289403W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780471649922",
+      "title": "Control Systems Engineering",
+      "author": "Norman S. Nise",
+      "publisher": "John Wiley & Sons Inc",
+      "edition": "4Rev Ed edition",
+      "published_date": "December 30, 2005",
+      "category": "Control Systems",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Control Systems core reference. Recommended for ECE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL10333624M",
+      "work_source": "https://openlibrary.org/works/OL3505210W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780130609076",
+      "title": "Modern Control Engineering",
+      "author": "Katsuhiko Ogata",
+      "publisher": "Prentice Hall",
+      "edition": "ISBN-13 edition",
+      "published_date": "November 13, 2001",
+      "category": "Control Systems",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Control Systems core reference. Recommended for ECE Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7332613M",
+      "work_source": "https://openlibrary.org/works/OL2717669W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9781118430620",
+      "title": "Designing the Internet of Things",
+      "author": "Adrian McEwen, Hakim Cassimally",
+      "publisher": "John Wiley & Sons",
+      "edition": "ISBN-13 edition",
+      "published_date": "2012",
+      "category": "Internet of Things",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Internet of Things core reference. Recommended for ECE Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26056412M",
+      "work_source": "https://openlibrary.org/works/OL17470742W"
+    },
+    {
+      "group": "department_core_ECE",
+      "isbn": "9780123821973",
+      "title": "Embedded Systems Architecture",
+      "author": "Tammy Noergaard",
+      "publisher": "Elsevier Science & Technology Books",
+      "edition": "ISBN-13 edition",
+      "published_date": "2012",
+      "category": "Embedded Systems",
+      "departments": [
+        "ECE"
+      ],
+      "description": "Embedded Systems core reference. Recommended for ECE Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL33436957M",
+      "work_source": "https://openlibrary.org/works/OL9487210W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780071141048",
+      "title": "Thermodynamics: An Engineering Approach",
+      "author": "Yunus A. Çengel",
+      "publisher": "McGraw",
+      "edition": "ISBN-13 edition",
+      "published_date": "1993",
+      "category": "Thermodynamics",
+      "departments": [
+        "ME"
+      ],
+      "description": "Thermodynamics core reference. Recommended for ME Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL22279411M",
+      "work_source": "https://openlibrary.org/works/OL5838743W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780471274711",
+      "title": "Fundamentals of Engineering Thermodynamics",
+      "author": "Michael J. Moran, Howard N. Shapiro",
+      "publisher": "Wiley",
+      "edition": "ISBN-13 edition",
+      "published_date": "June 11, 2003",
+      "category": "Thermodynamics",
+      "departments": [
+        "ME"
+      ],
+      "description": "Thermodynamics core reference. Recommended for ME Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7614457M",
+      "work_source": "https://openlibrary.org/works/OL2916926W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9781259696534",
+      "title": "Fluid Mechanics: Fundamentals and Applications",
+      "author": "Yunus A. Çengel, John M. Cimbala",
+      "publisher": "McGraw-Hill Education",
+      "edition": "ISBN-13 edition",
+      "published_date": "2017",
+      "category": "Fluid Mechanics",
+      "departments": [
+        "ME"
+      ],
+      "description": "Fluid Mechanics core reference. Recommended for ME Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL26612981M",
+      "work_source": "https://openlibrary.org/works/OL18026047W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780071199117",
+      "title": "Fluid Mechanics",
+      "author": "Frank M. White",
+      "publisher": "McGraw-Hill Companies",
+      "edition": "5th edition",
+      "published_date": "November 2002",
+      "category": "Fluid Mechanics",
+      "departments": [
+        "ME"
+      ],
+      "description": "Fluid Mechanics core reference. Recommended for ME Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL9963638M",
+      "work_source": "https://openlibrary.org/works/OL1911850W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780073398235",
+      "title": "Mechanics of Materials",
+      "author": "Ferdinand Pierre Beer, E. Russell Johnston, Jr., John T. DeWolf, David Mazurek",
+      "publisher": "McGraw-Hill Education",
+      "edition": "7th Edition",
+      "published_date": "Jan 24, 2014",
+      "category": "Strength of Materials",
+      "departments": [
+        "ME"
+      ],
+      "description": "Strength of Materials core reference. Recommended for ME Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28156857M",
+      "work_source": "https://openlibrary.org/works/OL284163W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780060453138",
+      "title": "Strength of Materials",
+      "author": "Andrew Pytel",
+      "publisher": "Harper & Row",
+      "edition": "4th ed.",
+      "published_date": "1987",
+      "category": "Strength of Materials",
+      "departments": [
+        "ME"
+      ],
+      "description": "Strength of Materials core reference. Recommended for ME Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL2724662M",
+      "work_source": "https://openlibrary.org/works/OL1953342W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780071077835",
+      "title": "Shigley's Mechanical Engineering Design",
+      "author": "Richard G. Budynas, Richard Budynas, J. Keith Nisbett",
+      "publisher": "Tata Mcgraw Hill Education",
+      "edition": "ISBN-13 edition",
+      "published_date": "2011-03-16",
+      "category": "Machine Design",
+      "departments": [
+        "ME"
+      ],
+      "description": "Machine Design core reference. Recommended for ME Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL50149483M",
+      "work_source": "https://openlibrary.org/works/OL1923658W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780133356717",
+      "title": "Machine Design",
+      "author": "Robert L. Norton",
+      "publisher": "Pearson",
+      "edition": "ISBN-13 edition",
+      "published_date": "Sep 16, 2013",
+      "category": "Machine Design",
+      "departments": [
+        "ME"
+      ],
+      "description": "Machine Design core reference. Recommended for ME Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28217059M",
+      "work_source": "https://openlibrary.org/works/OL1802156W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780131489653",
+      "title": "Manufacturing Engineering and Technology",
+      "author": "Serope Kalpakjian, Steven Schmid",
+      "publisher": "Prentice Hall",
+      "edition": "ISBN-13 edition",
+      "published_date": "August 3, 2005",
+      "category": "Manufacturing",
+      "departments": [
+        "ME"
+      ],
+      "description": "Manufacturing core reference. Recommended for ME Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7336806M",
+      "work_source": "https://openlibrary.org/works/OL3289918W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780074518632",
+      "title": "Manufacturing Technology",
+      "author": "P. N. Rao",
+      "publisher": "McGraw-Hill Education",
+      "edition": "ISBN-13 edition",
+      "published_date": "June 1, 1988",
+      "category": "Manufacturing",
+      "departments": [
+        "ME"
+      ],
+      "description": "Manufacturing core reference. Recommended for ME Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL9970394M",
+      "work_source": "https://openlibrary.org/works/OL13658656W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780132393218",
+      "title": "Automation, Production Systems, and Computer-Integrated Manufacturing",
+      "author": "Mikell P. Groover",
+      "publisher": "Prentice Hall",
+      "edition": "3rd ed.",
+      "published_date": "2008",
+      "category": "CAD/CAM",
+      "departments": [
+        "ME"
+      ],
+      "description": "CAD/CAM core reference. Recommended for ME Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL18744389M",
+      "work_source": "https://openlibrary.org/works/OL3752129W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780073398181",
+      "title": "Heat and Mass Transfer",
+      "author": "Yunus A. Çengel, Afshin Ghajar",
+      "publisher": "McGraw-Hill Education",
+      "edition": "ISBN-13 edition",
+      "published_date": "Apr 04, 2014",
+      "category": "Heat Transfer",
+      "departments": [
+        "ME"
+      ],
+      "description": "Heat Transfer core reference. Recommended for ME Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL27540677M",
+      "work_source": "https://openlibrary.org/works/OL20333053W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9780471786900",
+      "title": "Fundamentals of Heat and Mass Transfer",
+      "author": "Frank P. Incropera, David P. DeWitt",
+      "publisher": "Wiley & Sons, Incorporated, John",
+      "edition": "ISBN-13 edition",
+      "published_date": "2005",
+      "category": "Heat Transfer",
+      "departments": [
+        "ME"
+      ],
+      "description": "Heat Transfer core reference. Recommended for ME Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL39846542M",
+      "work_source": "https://openlibrary.org/works/OL2975219W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9788180141034",
+      "title": "Automobile Engineering",
+      "author": "Kirpal Singh",
+      "publisher": "Standard Publications-Delhi",
+      "edition": "ISBN-13 edition",
+      "published_date": "Sep 18, 2008",
+      "category": "Automobile Engineering",
+      "departments": [
+        "ME"
+      ],
+      "description": "Automobile Engineering core reference. Recommended for ME Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL30369707M",
+      "work_source": "https://openlibrary.org/works/OL22291692W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9781563272684",
+      "title": "Toyota Production System",
+      "author": "Taiichi Ohno",
+      "publisher": "Productivity Press",
+      "edition": "Abridged edition",
+      "published_date": "September 2002",
+      "category": "Industrial Engineering",
+      "departments": [
+        "ME"
+      ],
+      "description": "Industrial Engineering core reference. Recommended for ME Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL8643205M",
+      "work_source": "https://openlibrary.org/works/OL8681881W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9781577667391",
+      "title": "Factory Physics",
+      "author": "Wallace J. Hopp, Wallace Hopp, Mark Spearman, Mark L. Spearman",
+      "publisher": "Waveland Press, Incorporated",
+      "edition": "ISBN-13 edition",
+      "published_date": "2011",
+      "category": "Industrial Engineering",
+      "departments": [
+        "ME"
+      ],
+      "description": "Industrial Engineering core reference. Recommended for ME Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL35922500M",
+      "work_source": "https://openlibrary.org/works/OL547479W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9783319544120",
+      "title": "Robotics, Vision and Control",
+      "author": "Peter Corke",
+      "publisher": "Springer",
+      "edition": "ISBN-13 edition",
+      "published_date": "May 23, 2017",
+      "category": "Robotics",
+      "departments": [
+        "ME"
+      ],
+      "description": "Robotics core reference. Recommended for ME Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28022492M",
+      "work_source": "https://openlibrary.org/works/OL20721682W"
+    },
+    {
+      "group": "department_core_ME",
+      "isbn": "9781107156302",
+      "title": "Modern Robotics",
+      "author": "Frank C. Park, Kevin M. Lynch",
+      "publisher": "Cambridge University Press",
+      "edition": "ISBN-13 edition",
+      "published_date": "2017",
+      "category": "Robotics",
+      "departments": [
+        "ME"
+      ],
+      "description": "Robotics core reference. Recommended for ME Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28638269M",
+      "work_source": "https://openlibrary.org/works/OL21154447W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780333436097",
+      "title": "Surveying for Engineers",
+      "author": "J. Uren",
+      "publisher": "Macmillan",
+      "edition": "ISBN-13 edition",
+      "published_date": null,
+      "category": "Surveying",
+      "departments": [
+        "CV"
+      ],
+      "description": "Surveying core reference. Recommended for CV Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL14998522M",
+      "work_source": "https://openlibrary.org/works/OL6623681W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780132083072",
+      "title": "Elementary Surveying",
+      "author": "Paul R. Wolf, Brinker, Russell C., Paul Richard Wolf, Charles D. Ghilani",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2007",
+      "category": "Surveying",
+      "departments": [
+        "CV"
+      ],
+      "description": "Surveying core reference. Recommended for CV Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29025179M",
+      "work_source": "https://openlibrary.org/works/OL509008W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780134045719",
+      "title": "Structural Analysis",
+      "author": "R. C. Hibbeler",
+      "publisher": "Pearson Education, Limited",
+      "edition": "ISBN-13 edition",
+      "published_date": "2015",
+      "category": "Structural Analysis",
+      "departments": [
+        "CV"
+      ],
+      "description": "Structural Analysis core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL40441290M",
+      "work_source": "https://openlibrary.org/works/OL1865036W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9781111426224",
+      "title": "Matrix Analysis of Structures",
+      "author": "Aslam Kassimali",
+      "publisher": "Wadsworth",
+      "edition": "ISBN-13 edition",
+      "published_date": "2011",
+      "category": "Structural Analysis",
+      "departments": [
+        "CV"
+      ],
+      "description": "Structural Analysis core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28468741M",
+      "work_source": "https://openlibrary.org/works/OL1965075W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780534387426",
+      "title": "Principles of Geotechnical Engineering",
+      "author": "Braja M. Das",
+      "publisher": "Thomson-Engineering",
+      "edition": "5 edition",
+      "published_date": "September 10, 2001",
+      "category": "Geotechnical Engineering",
+      "departments": [
+        "CV"
+      ],
+      "description": "Geotechnical Engineering core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL7784580M",
+      "work_source": "https://openlibrary.org/works/OL50683W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780130130372",
+      "title": "Geotechnical Engineering: Principles and Practices",
+      "author": "Donald P. Coduto",
+      "publisher": "Prentice Hall",
+      "edition": "ISBN-13 edition",
+      "published_date": "1999",
+      "category": "Geotechnical Engineering",
+      "departments": [
+        "CV"
+      ],
+      "description": "Geotechnical Engineering core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL21576660M",
+      "work_source": "https://openlibrary.org/works/OL1894242W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780273016434",
+      "title": "Properties of Concrete",
+      "author": "A M Neville",
+      "publisher": "Financial Times Prentice Hall",
+      "edition": "3d ed edition",
+      "published_date": "January 13, 1986",
+      "category": "Concrete Technology",
+      "departments": [
+        "CV"
+      ],
+      "description": "Concrete Technology core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL10284745M",
+      "work_source": "https://openlibrary.org/works/OL9368592W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780073397948",
+      "title": "Design of Concrete Structures",
+      "author": "Arthur H. Nilson",
+      "publisher": "McGraw-Hill Education",
+      "edition": "ISBN-13 edition",
+      "published_date": "2015",
+      "category": "Concrete Technology",
+      "departments": [
+        "CV"
+      ],
+      "description": "Concrete Technology core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL28511081M",
+      "work_source": "https://openlibrary.org/works/OL3332768W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780073401140",
+      "title": "Introduction to Environmental Engineering",
+      "author": "Mackenzie L. Davis, David A. Cornwell",
+      "publisher": "McGraw-Hill",
+      "edition": "5th ed.",
+      "published_date": "2013",
+      "category": "Environmental Engineering",
+      "departments": [
+        "CV"
+      ],
+      "description": "Environmental Engineering core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL25026101M",
+      "work_source": "https://openlibrary.org/works/OL16143061W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780073397863",
+      "title": "Water and Wastewater Engineering",
+      "author": "Mackenzie Leo Davis",
+      "publisher": "McGraw-Hill",
+      "edition": "ISBN-13 edition",
+      "published_date": "2010",
+      "category": "Environmental Engineering",
+      "departments": [
+        "CV"
+      ],
+      "description": "Environmental Engineering core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL23862002M",
+      "work_source": "https://openlibrary.org/works/OL15118281W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9781118524459",
+      "title": "Principles of Highway Engineering and Traffic Analysis",
+      "author": "Fred L. Mannering, Walter P. Kilareski, Scott S. Washburn",
+      "publisher": "Wiley & Sons, Incorporated, John",
+      "edition": "ISBN-13 edition",
+      "published_date": "2012",
+      "category": "Transportation Engineering",
+      "departments": [
+        "CV"
+      ],
+      "description": "Transportation Engineering core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL39944772M",
+      "work_source": "https://openlibrary.org/works/OL2626415W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780495082507",
+      "title": "Traffic and Highway Engineering",
+      "author": "Nicholas J. Garber, Lester A. Hoel",
+      "publisher": "Cengage Learning",
+      "edition": "4th ed.",
+      "published_date": "2009",
+      "category": "Transportation Engineering",
+      "departments": [
+        "CV"
+      ],
+      "description": "Transportation Engineering core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL22847818M",
+      "work_source": "https://openlibrary.org/works/OL570173W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780070859067",
+      "title": "Open-Channel Hydraulics",
+      "author": "Ven Te Chow",
+      "publisher": "McGraw-Hill International",
+      "edition": "International student edition.",
+      "published_date": "1982",
+      "category": "Fluid Mechanics",
+      "departments": [
+        "CV"
+      ],
+      "description": "Fluid Mechanics core reference. Recommended for CV Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL22597335M",
+      "work_source": "https://openlibrary.org/works/OL1332594W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9781315138640",
+      "title": "Building Materials",
+      "author": "S. K. Duggal",
+      "publisher": "CRC Press LLC",
+      "edition": "ISBN-13 edition",
+      "published_date": "2017",
+      "category": "Building Materials",
+      "departments": [
+        "CV"
+      ],
+      "description": "Building Materials core reference. Recommended for CV Year 1–2 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL29392531M",
+      "work_source": "https://openlibrary.org/works/OL19832495W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9788185273686",
+      "title": "Estimating and Costing in Civil Engineering",
+      "author": "B. N. Dutta",
+      "publisher": "UBSPD",
+      "edition": "23rd ed. / revised by S. Dutta.",
+      "published_date": "1993",
+      "category": "Estimation and Costing",
+      "departments": [
+        "CV"
+      ],
+      "description": "Estimation and Costing core reference. Recommended for CV Year 2–3 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL15311538M",
+      "work_source": "https://openlibrary.org/works/OL11522655W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9781119256809",
+      "title": "Construction Management",
+      "author": "Daniel W. Halpin, Ronald W. Woodhead",
+      "publisher": "Wiley & Sons, Limited, John",
+      "edition": "ISBN-13 edition",
+      "published_date": "2021",
+      "category": "Construction Management",
+      "departments": [
+        "CV"
+      ],
+      "description": "Construction Management core reference. Recommended for CV Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL34638773M",
+      "work_source": "https://openlibrary.org/works/OL2668215W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9780070435872",
+      "title": "Construction Project Management",
+      "author": "K. K. Chitkara",
+      "publisher": "McGraw-Hill",
+      "edition": "ISBN-13 edition",
+      "published_date": "2004",
+      "category": "Construction Management",
+      "departments": [
+        "CV"
+      ],
+      "description": "Construction Management core reference. Recommended for CV Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL9959789M",
+      "work_source": "https://openlibrary.org/works/OL9305268W"
+    },
+    {
+      "group": "department_core_CV",
+      "isbn": "9781118879016",
+      "title": "Design of Reinforced Concrete",
+      "author": "Jack C. McCormac",
+      "publisher": "Wiley & Sons, Incorporated, John",
+      "edition": "ISBN-13 edition",
+      "published_date": "2015",
+      "category": "Structural Design",
+      "departments": [
+        "CV"
+      ],
+      "description": "Structural Design core reference. Recommended for CV Year 3–4 students.",
+      "total_copies": 6,
+      "is_active": true,
+      "metadata_source": "https://openlibrary.org/books/OL35580559M",
+      "work_source": "https://openlibrary.org/works/OL1864859W"
+    }
+  ]
+}

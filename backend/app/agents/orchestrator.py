@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .. import assistant_routing as conversational
 from .. import config, llm, provenance, router
+from ..library import assistant as library_assistant
 from . import tools as toolreg
 from .base import BaseAgent
 
@@ -486,6 +487,15 @@ class OrchestratorAgent(BaseAgent):
                 capability["description"] + " I cannot change records, bypass permissions, "
                 "process credentials, or provide professional or emergency advice.",
                 source="Safe fallback")
+        library_request = library_assistant.detect_library_request(message)
+        if library_request is not None:
+            if user.role != "student":
+                return library_assistant.role_denied_response()
+            try:
+                return await library_assistant.answer_library_request(
+                    db, self.agents["library_agent"], library_request)
+            except Exception:
+                return library_assistant.unavailable_response(library_request.term)
         department_summary = self._department_summary_response(db, user, message, self.agents)
         if department_summary is not None:
             return department_summary
