@@ -3,13 +3,13 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppLayout } from '../layouts/AppLayout';
 
-const mocks = vi.hoisted(() => ({ notifications: vi.fn() }));
+const mocks = vi.hoisted(() => ({ notifications: vi.fn(), markNotificationRead: vi.fn(), markAllNotificationsRead: vi.fn() }));
 let auth = { token: 'token-a', user: { username: 'student-a', name: 'Student A', role: 'student' }, logout: vi.fn() };
 const { notifications } = mocks;
 
 vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('../services/api', () => ({
-  api: { notifications: mocks.notifications },
+  api: { notifications: mocks.notifications, markNotificationRead: mocks.markNotificationRead, markAllNotificationsRead: mocks.markAllNotificationsRead },
   ApiError: class ApiError extends Error {},
 }));
 
@@ -29,6 +29,8 @@ describe('shared notifications', () => {
   beforeEach(() => {
     auth = { token: 'token-a', user: { username: 'student-a', name: 'Student A', role: 'student' }, logout: vi.fn() };
     notifications.mockReset();
+    mocks.markNotificationRead.mockReset().mockResolvedValue({ read: true });
+    mocks.markAllNotificationsRead.mockReset().mockResolvedValue({ updated: 1 });
   });
 
   it('shows fetched notifications and the correct unread bell count', async () => {
@@ -46,6 +48,34 @@ describe('shared notifications', () => {
     notifications.mockResolvedValue({ notifications: [unread, read], unread_count: 1 });
     renderLayout();
     await waitFor(() => expect(screen.getByRole('button', { name: /1 unread/i })).toBeInTheDocument());
+  });
+
+  it('marks one row and updates the unread badge without marking all', async () => {
+    notifications.mockResolvedValue({ notifications: [unread, read], unread_count: 1 });
+    renderLayout();
+    await openDrawer();
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark as read' }));
+    await waitFor(() => expect(mocks.markNotificationRead).toHaveBeenCalledWith('token-a', 1));
+    expect(mocks.markAllNotificationsRead).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Open notifications' })).toBeInTheDocument();
+  });
+
+  it('marks one notification then follows only a safe internal route', async () => {
+    notifications.mockResolvedValue({ notifications: [{ ...unread, route: '/student/placements/42' }], unread_count: 1 });
+    render(<MemoryRouter initialEntries={['/']}><Routes><Route element={<AppLayout />}><Route index element={<div>Dashboard</div>} /><Route path="student/placements/:id" element={<div>Placement detail</div>} /></Route></Routes></MemoryRouter>);
+    await openDrawer();
+    fireEvent.click(await screen.findByRole('button', { name: /attendance alert/i }));
+    expect(await screen.findByText('Placement detail')).toBeInTheDocument();
+    expect(mocks.markNotificationRead).toHaveBeenCalledWith('token-a', 1);
+  });
+
+  it('does not navigate to an external notification URL', async () => {
+    notifications.mockResolvedValue({ notifications: [{ ...unread, route: 'https://evil.example' }], unread_count: 1 });
+    renderLayout();
+    await openDrawer();
+    fireEvent.click(await screen.findByRole('button', { name: /attendance alert/i }));
+    await waitFor(() => expect(mocks.markNotificationRead).toHaveBeenCalled());
+    expect(screen.getByText('Dashboard')).toBeInTheDocument();
   });
 
   it('shows an empty state only after a successful empty response', async () => {

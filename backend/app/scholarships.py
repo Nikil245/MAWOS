@@ -12,6 +12,7 @@ from .agents.finance import fees_cleared
 from .models import (AttendanceSummary, Notification, Scholarship,
                      ScholarshipApplication, ScholarshipAssessment, Student,
                      WorkflowEvent, utcnow)
+from .notifications import notify_role, notify_usns
 
 STATUSES = {"DRAFT", "PENDING_APPROVAL", "CHANGES_REQUESTED", "REJECTED", "PUBLISHED", "CLOSED"}
 RESULTS = {"ELIGIBLE", "NOT_ELIGIBLE", "UNABLE_TO_DETERMINE", "CLOSED", "ALREADY_APPLIED"}
@@ -56,9 +57,20 @@ def effective_status(row, now=None):
 def _event(db, action, scholarship, actor):
     db.add(WorkflowEvent(workflow_id=str(uuid.uuid4()), topic=f"scholarship.{action.lower()}",
                          agent="scholarship_service", payload=_dump({"scholarship_id": scholarship.id, "actor": actor}), hop=0))
-def _notify(db, title, message, *, usn=None, role=None, dept=None):
-    db.add(Notification(usn=usn, audience_role=role, dept_code=dept, title=title,
-                        message=message, source_agent="scholarship_service"))
+def _notify(db, title, message, *, usn=None, role=None, dept=None,
+            notification_type="SCHOLARSHIP_UPDATE", event_key=None,
+            route=None, related_entity_id=None):
+    options = dict(
+        title=title, message=message, notification_type=notification_type,
+        source_agent="scholarship_service",
+        event_key=event_key or f"scholarship:{uuid.uuid4()}",
+        route=route, related_entity_type="scholarship" if related_entity_id else None,
+        related_entity_id=related_entity_id)
+    if usn:
+        return notify_usns(db, [usn], **options)
+    if role:
+        return notify_role(db, role, dept=dept, **options)
+    return 0
 def _require(condition, detail="Not authorized"):
     if not condition: raise HTTPException(status_code=403, detail=detail)
 def _not_found(row):

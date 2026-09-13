@@ -4,6 +4,8 @@ export const defaultRouteByRole = {
   hod: '/hod',
   principal: '/principal',
   admin: '/admin',
+  parent: '/parent',
+  librarian: '/librarian/library',
 };
 
 export const scholarshipRouteByRole = {
@@ -13,15 +15,20 @@ export const scholarshipRouteByRole = {
 };
 
 const allowedPaths = {
-  student: ['/student/placements', '/student', '/student/timetable', '/student/scholarships', '/assistant', '/system'],
-  faculty: ['/faculty', '/faculty/timetable', '/faculty/scholarships', '/assistant', '/system'],
-  hod: ['/hod/timetable', '/faculty/timetable', '/hod', '/hod/scholarships', '/faculty', '/assistant', '/system'],
-  principal: ['/principal/timetable', '/principal', '/assistant', '/system'],
-  admin: ['/admin/placements', '/admin/timetable', '/principal/timetable', '/admin', '/principal', '/assistant', '/system'],
+  student: ['/student/library', '/events', '/student/placements', '/student', '/student/timetable', '/student/scholarships', '/assistant', '/system'],
+  faculty: ['/events', '/faculty', '/faculty/timetable', '/faculty/scholarships', '/assistant', '/system'],
+  hod: ['/events', '/hod/timetable', '/faculty/timetable', '/hod', '/hod/scholarships', '/faculty', '/assistant', '/system'],
+  principal: ['/events', '/principal/timetable', '/principal', '/assistant', '/system'],
+  admin: ['/admin/library', '/admin/librarians', '/admin/parents', '/events', '/admin/events', '/admin/placements', '/admin/timetable', '/principal/timetable', '/admin', '/principal', '/assistant', '/system'],
+  librarian: ['/librarian/library'],
+  parent: ['/parent', '/parent/timetable', '/parent/notifications'],
 };
 
 export function isRouteAllowedForRole(role, pathname) {
-  return typeof pathname === 'string' && allowedPaths[role]?.includes(pathname);
+  return typeof pathname === 'string' && (allowedPaths[role]?.includes(pathname)
+    || (/^\/events\/\d+$/.test(pathname) && allowedPaths[role]?.includes('/events'))
+    || (role === 'student' && /^\/student\/library\/slips\/\d+$/.test(pathname))
+    || (role === 'parent' && /^\/parent\/events\/\d+$/.test(pathname)));
 }
 
 // A staff scholarship URL is always redirected to the authenticated role's

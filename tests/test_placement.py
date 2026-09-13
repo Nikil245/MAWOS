@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 from backend.app.database import Base, get_session
 from backend.app.auth import get_current_user
 from backend.app.main import app
-from backend.app.models import Department, FeeRecord, Notification, PlacementDrive, PlacementOutcome, PlacementShortlist, Student
+from backend.app.models import Department, FeeRecord, Notification, PlacementDrive, PlacementOutcome, PlacementShortlist, Student, User
 from backend.app.placement import api, scoring
 from backend.app.placement.schemas import DriveInput, OutcomeInput
 from backend.app.placement.service import PlacementError, PlacementService, hard_failures
@@ -35,6 +35,10 @@ def placement_db():
         for year in range(1, 5):
             db.add(Student(usn=f'P{year}', name=f'Year {year}', dept_code='AIML', year=year,
                            semester=year * 2, section='A', cgpa=8, backlogs=0, family_income=0))
+        db.flush()
+        for year in range(1, 5):
+            db.add(User(username=f'P{year}', password_hash='test', role='student',
+                        display_name=f'Year {year}', usn=f'P{year}', dept_code='AIML'))
         db.commit()
         yield db, factory
     engine.dispose()
@@ -62,11 +66,55 @@ def test_departments_and_lifecycle(placement_db):
     for operation in [lambda: service.save_drive(db, data, drive['id']), lambda: service.generate(db, drive['id']), lambda: service.transition(db, drive['id'], 'close')]:
         with pytest.raises(PlacementError):
             operation()
-    service.transition(db, drive['id'], 'cancel')
+    with pytest.raises(PlacementError):
+        service.transition(db, drive['id'], 'cancel', 'Withdrawn')
+    other = service.save_drive(db, drive_input())
+    with pytest.raises(PlacementError, match='reason is required'):
+        service.transition(db, other['id'], 'cancel')
+    service.transition(db, other['id'], 'cancel', 'Company withdrew')
     with pytest.raises(PlacementError):
         service.generate(db, drive['id'], True)
     with pytest.raises(PlacementError):
         service.save_drive(db, drive_input(departments='UNKNOWN'))
+
+
+def test_open_drive_notifications_are_final_year_department_scoped_and_deduplicated(placement_db):
+    db, _ = placement_db
+    db.add(Department(code='CSE', name='Computer Science', intake=60)); db.flush()
+    db.add_all([
+        Student(usn='CSE4', name='CSE Finalist', dept_code='CSE', year=4, semester=8,
+                section='A', cgpa=8, backlogs=0, family_income=0),
+        User(username='CSE4', password_hash='test', role='student', display_name='CSE Finalist',
+             usn='CSE4', dept_code='CSE')])
+    db.flush()
+    service = PlacementService()
+    record = service.save_drive(db, drive_input(company='Oracle', departments=' aiml , AIML ',
+                                application_deadline=dt.date.today()))
+    db.commit()
+    notices = db.query(Notification).filter_by(notification_type='PLACEMENT_DRIVE_OPENED').all()
+    assert {n.usn for n in notices} == {'P4'}
+    assert notices[0].route == f"/student/placements/{record['id']}"
+    assert 'Engineer' in notices[0].message and '8 LPA' in notices[0].message
+    service.save_drive(db, drive_input(company='Oracle updated', departments='AIML'), record['id'])
+    db.commit()
+    assert db.query(Notification).filter_by(notification_type='PLACEMENT_DRIVE_OPENED').count() == 1
+
+
+def test_all_departments_and_draft_to_open_notification_lifecycle(placement_db):
+    db, _ = placement_db
+    db.add(Department(code='CSE', name='Computer Science', intake=60)); db.flush()
+    db.add(Student(usn='CSE4', name='CSE Finalist', dept_code='CSE', year=4, semester=8,
+                   section='A', cgpa=8, backlogs=0, family_income=0)); db.flush()
+    db.add(User(username='CSE4', password_hash='test', role='student', display_name='CSE Finalist',
+                usn='CSE4', dept_code='CSE')); db.flush()
+    service = PlacementService()
+    draft = service.save_drive(db, drive_input(company='Draft Company', status='DRAFT'))
+    db.commit()
+    assert db.query(Notification).filter_by(notification_type='PLACEMENT_DRIVE_OPENED').count() == 0
+    service.save_drive(db, drive_input(company='Draft Company', status='OPEN'), draft['id'])
+    db.commit()
+    notices = db.query(Notification).filter_by(notification_type='PLACEMENT_DRIVE_OPENED').all()
+    assert {n.usn for n in notices} == {'P4', 'CSE4'}
 
 
 def test_all_hard_filter_reasons_and_no_model_call(placement_db):
@@ -175,6 +223,8 @@ def test_final_outcome_freeze_only_automatic(placement_db, status):
     service.generate(db, drive['id'])
     outcome, events = service.record_outcome(db, drive['id'], ' p4 ', OutcomeInput(outcome_status=status))
     assert events[0][0] == 'placement.' + status.lower()
+    notice = db.query(Notification).filter_by(usn='P4', notification_type='PLACEMENT_OUTCOME').one()
+    assert notice.route == f"/student/placements/{drive['id']}"
     db.get(Student, 'P4').cgpa = 1
     db.flush()
     assert service.reevaluate_student(db, 'P4') == (1 if status == 'OFFER_MADE' else 0)
@@ -256,8 +306,8 @@ def test_admin_api_is_role_protected(placement_client, role):
         assert getattr(client, method)(path, json=body).status_code == 403
     assert client.get(root+'/shortlist').status_code == 403
     assert client.get(root+'/outcomes').status_code == 403
-    assert client.get(root).status_code == 200
-    assert client.get('/api/placements/drives').status_code == 200
+    assert client.get(root).status_code == (200 if role == 'student' else 403)
+    assert client.get('/api/placements/drives').status_code == (200 if role == 'student' else 403)
     if role != 'student':
         assert client.get(root+'/eligibility/P4').status_code == 403
 
@@ -283,6 +333,20 @@ def test_admin_commands_and_controlled_conflicts(placement_client):
     assert client.get(root+'/outcomes').json()[0]['usn'] == 'P4'
     assert any(topic == 'placement.offer_accepted' for topic, _ in events)
     assert client.put(root+'/outcomes/p4', json={'outcome_status': 'INVALID'}).status_code == 422
+    view = client.get(root+'/admin-view')
+    assert view.status_code == 200
+    assert view.json()['shortlist'][0]['outcome']['outcome_status'] == 'OFFER_ACCEPTED'
+
+
+def test_close_and_cancel_are_distinct_api_transitions(placement_client):
+    client, user, drive, _ = placement_client
+    root = f'/api/placements/drives/{drive}'
+    assert client.post(root + '/cancel', json={}).status_code == 422
+    response = client.post(root + '/cancel', json={'reason': 'Company withdrew role'})
+    assert response.status_code == 200
+    assert response.json()['status'] == 'CANCELLED'
+    assert response.json()['cancellation_reason'] == 'Company withdrew role'
+    assert client.post(root + '/close').status_code == 409
 
 
 def test_event_subscriptions_and_deduplicated_notifications(placement_db, monkeypatch):
@@ -313,5 +377,5 @@ def test_event_subscriptions_and_deduplicated_notifications(placement_db, monkey
         db.commit()
         for topic, payload in events:
             asyncio.run(bus.publish(topic, payload))
-    assert db.query(Notification).filter_by(usn='P4').count() == 1
+    assert db.query(Notification).filter_by(usn='P4', notification_type='PLACEMENT_SHORTLISTED').count() == 1
     assert db.query(Notification).filter_by(usn='P1').count() == 0

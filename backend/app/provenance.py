@@ -47,7 +47,8 @@ TOLERANCE = 0.05
 STATIC_GROUNDED = {
     config.ATTENDANCE_THRESHOLD, config.ABSENCE_STREAK_ALERT,
     config.FEE_LATE_FINE_PER_DAY, config.FEE_GRACE_DAYS,
-    config.LIBRARY_LOAN_DAYS, config.LIBRARY_FINE_PER_DAY,
+    # Claim matching uses approximate display numbers, never monetary accounting.
+    config.LIBRARY_LOAN_DAYS, float(config.LIBRARY_FINE_PER_DAY),
 }
 
 

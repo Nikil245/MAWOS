@@ -7,7 +7,8 @@ import datetime as dt
 
 from sqlalchemy import func
 
-from ..models import Department, PlacementDrive, PlacementOutcome, PlacementShortlist, Student, utcnow
+from ..models import Department, PlacementDrive, PlacementOutcome, PlacementShortlist, Student, User, utcnow
+from ..notifications import notify_users, notify_usns
 from . import scoring
 
 ACTIVE = ('OPEN', 'SHORTLIST_GENERATED')
@@ -27,8 +28,17 @@ def normalize_usn(usn):
 def drive_record(drive):
     fields = ('id', 'company', 'role', 'package_lpa', 'drive_date', 'departments',
               'status', 'min_cgpa', 'max_backlogs', 'min_attendance',
-              'requires_fee_clearance', 'application_deadline', 'created_at', 'updated_at')
-    return {name: getattr(drive, name) for name in fields}
+              'requires_fee_clearance', 'application_deadline', 'description',
+              'application_url', 'cancellation_reason', 'created_at', 'updated_at')
+    record = {name: getattr(drive, name) for name in fields}
+    record['job_document'] = None if not drive.job_document_storage_key else {
+        'original_name': drive.job_document_original_name,
+        'content_type': drive.job_document_content_type,
+        'size_bytes': drive.job_document_size_bytes,
+        'uploaded_at': drive.job_document_uploaded_at,
+        'download_url': f'/api/placements/drives/{drive.id}/document',
+    }
+    return record
 
 
 def outcome_record(outcome):
@@ -66,39 +76,76 @@ class PlacementService:
             raise PlacementError('Placement drive not found', 404)
         return drive
 
-    def list_drives(self, db, admin=False):
+    def list_drives(self, db, admin=False, usn=None):
         result = []
-        for drive in db.query(PlacementDrive).order_by(PlacementDrive.drive_date.desc(), PlacementDrive.id.desc()):
+        query = db.query(PlacementDrive)
+        if not admin:
+            query = query.filter(PlacementDrive.status != 'DRAFT')
+        for drive in query.order_by(PlacementDrive.drive_date.desc(), PlacementDrive.id.desc()):
             item = drive_record(drive)
             if admin:
                 query = db.query(PlacementShortlist).filter_by(drive_id=drive.id)
                 item.update(candidate_count=query.count(), shortlisted_count=query.filter_by(eligible=True).count())
+            elif usn:
+                eligibility = self.eligibility_fields(db, drive, usn)
+                eligibility['eligibility_status'] = eligibility.pop('status')
+                item.update(eligibility)
             result.append(item)
         return result
 
-    def save_drive(self, db, data, drive_id=None):
+    def save_drive(self, db, data, drive_id=None, events=None):
         if data.departments != 'ALL':
             codes = data.departments.split(',')
             known = {code for code, in db.query(Department.code).filter(Department.code.in_(codes))}
             if set(codes) != known:
                 raise PlacementError('Unknown department code in eligible list', 422)
         drive = self.drive(db, drive_id, lock=True) if drive_id else PlacementDrive()
+        was_open = drive_id is not None and drive.status == 'OPEN'
         if drive_id and drive.status not in ('DRAFT', 'OPEN'):
             raise PlacementError('Only DRAFT or OPEN drives may be edited')
         if data.status not in ('DRAFT', 'OPEN') or (drive_id and drive.status == 'OPEN' and data.status == 'DRAFT'):
             raise PlacementError('Use explicit lifecycle actions; only DRAFT to OPEN is allowed when editing')
         for name, value in data.model_dump().items():
             setattr(drive, name, value)
+        if drive.status != 'CANCELLED':
+            drive.cancellation_reason = None
         db.add(drive)
         db.flush()
+        if data.status == 'OPEN' and not was_open:
+            notified = self._announce_open_drive(db, drive)
+            if events is not None:
+                events.append(('placement.drive_opened', dict(
+                    drive_id=drive.id, company=drive.company, notified_count=notified)))
         return drive_record(drive)
 
-    def transition(self, db, drive_id, action):
+    def _announce_open_drive(self, db, drive):
+        departments = {code.strip().upper() for code in drive.departments.split(',') if code.strip()}
+        recipients = (db.query(User.id).join(Student, Student.usn == User.usn)
+                      .filter(User.role == 'student', Student.year == 4))
+        if departments != {'ALL'}:
+            recipients = recipients.filter(func.upper(Student.dept_code).in_(departments))
+        deadline = (f', application deadline {drive.application_deadline.isoformat()}'
+                    if drive.application_deadline else '')
+        message = (f'{drive.role} · {drive.package_lpa:g} LPA · drive date '
+                   f'{drive.drive_date.isoformat()}{deadline}.')
+        return notify_users(
+            db, (user_id for user_id, in recipients.all()),
+            title=f'New placement drive: {drive.company}', message=message,
+            notification_type='PLACEMENT_DRIVE_OPENED', source_agent='placement_service',
+            event_key=f'placement_drive_opened:{drive.id}',
+            route=f'/student/placements/{drive.id}',
+            related_entity_type='placement_drive', related_entity_id=drive.id)
+
+    def transition(self, db, drive_id, action, reason=None):
         drive = self.drive(db, drive_id, lock=True)
         if action == 'close' and drive.status in ACTIVE:
             drive.status = 'CLOSED'
-        elif action == 'cancel' and drive.status != 'CANCELLED':
+            drive.cancellation_reason = None
+        elif action == 'cancel' and drive.status in ('DRAFT', *ACTIVE):
+            if not reason or not reason.strip():
+                raise PlacementError('Cancellation reason is required', 400)
             drive.status = 'CANCELLED'
+            drive.cancellation_reason = reason.strip()
         else:
             raise PlacementError('Invalid drive lifecycle transition')
         drive.updated_at = utcnow()
@@ -144,6 +191,14 @@ class PlacementService:
             entry = self.upsert(db, student, drive)
             if entry.eligible:
                 shortlisted += 1
+                notify_usns(
+                    db, [student.usn],
+                    title=f'Placement shortlist: {drive.company}',
+                    message=f'You have been shortlisted for {drive.company} — {drive.role}.',
+                    notification_type='PLACEMENT_SHORTLISTED', source_agent='placement_service',
+                    event_key=f'placement_shortlisted:{drive.id}:{student.usn}',
+                    route=f'/student/placements/{drive.id}',
+                    related_entity_type='placement_drive', related_entity_id=drive.id)
                 events.append(('placement.notification_required', dict(usn=student.usn,
                               notification_type='PLACEMENT_SHORTLISTED', drive_id=drive.id)))
         drive.status, drive.updated_at = 'SHORTLIST_GENERATED', utcnow()
@@ -177,6 +232,12 @@ class PlacementService:
 
     def eligibility(self, db, drive_id, usn):
         drive = self.drive(db, drive_id)
+        if drive.status == 'DRAFT':
+            raise PlacementError('Placement drive not found', 404)
+        return dict(usn=normalize_usn(usn), drive=drive_record(drive),
+                    **self.eligibility_fields(db, drive, usn))
+
+    def eligibility_fields(self, db, drive, usn):
         student = db.get(Student, normalize_usn(usn))
         if student is None:
             raise PlacementError('Student not found', 404)
@@ -189,7 +250,27 @@ class PlacementService:
             result = self.evaluate(db, student, drive, use_model=False) if student.year == 4 else dict(
                 eligible=False, ml_probability=None, model_version=None, reasons='Placements open in final year')
             result['status'] = 'NOT_EVALUATED'
-        return dict(usn=student.usn, drive=drive_record(drive), **result)
+        can_apply = (drive.status in ACTIVE and drive.application_url is not None
+                     and (drive.application_deadline is None or drive.application_deadline >= dt.date.today())
+                     and result['eligible'] is True)
+        if can_apply:
+            apply_message = 'Eligible to apply on the official company portal.'
+        elif drive.status == 'CLOSED':
+            apply_message = 'This drive is closed; external applications are no longer available.'
+        elif drive.status == 'CANCELLED':
+            apply_message = 'This drive was cancelled; external applications are unavailable.'
+        elif drive.application_deadline and drive.application_deadline < dt.date.today():
+            apply_message = 'The application deadline has passed.'
+        elif result['eligible'] is not True:
+            apply_message = 'You are not currently eligible for this drive.'
+        elif not drive.application_url:
+            apply_message = 'The company has not provided an external application link.'
+        else:
+            apply_message = 'External applications are unavailable.'
+        return dict(**result, can_apply=can_apply, apply_message=apply_message)
+
+    def student_detail(self, db, drive_id, usn):
+        return self.eligibility(db, drive_id, usn)
 
     def shortlist(self, db, drive_id):
         self.drive(db, drive_id)
@@ -200,7 +281,7 @@ class PlacementService:
                      model_version=row.model_version, reasons=row.reasons, updated_at=row.updated_at) for row, name in rows]
 
     def record_outcome(self, db, drive_id, usn, data):
-        self.drive(db, drive_id, lock=True)
+        drive = self.drive(db, drive_id, lock=True)
         usn = normalize_usn(usn)
         student = db.query(Student).filter_by(usn=usn).with_for_update().one_or_none()
         if student is None:
@@ -217,6 +298,15 @@ class PlacementService:
         outcome.outcome_status, outcome.package_offered = data.outcome_status, data.package_offered
         outcome.decided_at = outcome.updated_at = utcnow()
         db.flush()
+        package = f' Package: {data.package_offered:g} LPA.' if data.package_offered else ''
+        notify_usns(
+            db, [usn],
+            title=f'Placement outcome: {drive.company}',
+            message=f'Your outcome for {drive.role} is {data.outcome_status.replace("_", " ").title()}.{package}',
+            notification_type='PLACEMENT_OUTCOME', source_agent='placement_service',
+            event_key=f'placement_outcome:{drive_id}:{usn}:{data.outcome_status}',
+            route=f'/student/placements/{drive_id}',
+            related_entity_type='placement_drive', related_entity_id=drive_id)
         event = ('placement.' + data.outcome_status.lower(), dict(drive_id=drive_id, usn=usn,
                  outcome_status=data.outcome_status, package_offered=data.package_offered))
         return outcome_record(outcome), [event]
@@ -224,6 +314,46 @@ class PlacementService:
     def outcomes(self, db, drive_id):
         self.drive(db, drive_id)
         return [outcome_record(row) for row in db.query(PlacementOutcome).filter_by(drive_id=drive_id).order_by(PlacementOutcome.usn)]
+
+    def admin_view(self, db, drive_id):
+        drive = drive_record(self.drive(db, drive_id))
+        outcomes = {row['usn']: row for row in self.outcomes(db, drive_id)}
+        rows = self.shortlist(db, drive_id)
+        for row in rows:
+            row['outcome'] = outcomes.pop(row['usn'], None)
+        return {'drive': drive, 'shortlist': rows, 'other_outcomes': list(outcomes.values())}
+
+    def set_document(self, db, drive_id, document, user_id):
+        drive = self.drive(db, drive_id, lock=True)
+        if drive.status not in ('DRAFT', 'OPEN'):
+            raise PlacementError('Documents may be changed only on DRAFT or OPEN drives')
+        old_key = drive.job_document_storage_key
+        drive.job_document_storage_key = document.storage_key
+        drive.job_document_original_name = document.original_name
+        drive.job_document_content_type = document.content_type
+        drive.job_document_size_bytes = document.size_bytes
+        drive.job_document_sha256 = document.sha256
+        drive.job_document_uploaded_at = utcnow()
+        drive.job_document_uploaded_by = user_id
+        drive.updated_at = utcnow()
+        db.flush()
+        return drive_record(drive), old_key
+
+    def clear_document(self, db, drive_id):
+        drive = self.drive(db, drive_id, lock=True)
+        if drive.status not in ('DRAFT', 'OPEN'):
+            raise PlacementError('Documents may be changed only on DRAFT or OPEN drives')
+        old_key = drive.job_document_storage_key
+        if not old_key:
+            raise PlacementError('Job document not found', 404)
+        for field in ('job_document_storage_key', 'job_document_original_name',
+                      'job_document_content_type', 'job_document_size_bytes',
+                      'job_document_sha256', 'job_document_uploaded_at',
+                      'job_document_uploaded_by'):
+            setattr(drive, field, None)
+        drive.updated_at = utcnow()
+        db.flush()
+        return drive_record(drive), old_key
 
     def stats(self, db):
         eligible = (db.query(Student.dept_code, func.count(func.distinct(PlacementShortlist.usn)))

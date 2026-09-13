@@ -472,7 +472,7 @@ def get_exam_schedule(db, agents, user, args):
 @tool("get_notifications", "The caller's recent notifications.")
 def get_notifications(db, agents, user, args):
     return {"notifications": agents["notification_agent"].for_user(
-        db, usn=user.usn, role=user.role, dept=user.dept_code)}
+        db, user_id=user.id)}
 
 
 @tool("get_dept_analytics", "Department analytics: headcount, average "

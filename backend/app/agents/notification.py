@@ -1,6 +1,9 @@
 """Notification Agent — event-driven, context-aware alerts for every cascade
 topic, including the proactive scans and admissions events."""
+import uuid
+
 from ..models import Notification
+from ..notifications import notify_role, notify_usns, serialize
 from .base import BaseAgent
 
 
@@ -30,20 +33,32 @@ class NotificationAgent(BaseAgent):
             entry = db.query(PlacementShortlist).filter_by(drive_id=drive_id, usn=usn, eligible=True).first()
             if student is None or drive is None or entry is None:
                 return
-            title = f'Placement shortlisted · drive {drive.id}'
-            if not db.query(Notification.id).filter_by(usn=usn, title=title, source_agent=self.name).first():
-                self._notify(db, title, f'You have been shortlisted for {drive.company} — {drive.role}.', usn=usn)
-                db.commit()
+            self._notify(db, f'Placement shortlist: {drive.company}',
+                         f'You have been shortlisted for {drive.company} — {drive.role}.',
+                         usn=usn, notification_type='PLACEMENT_SHORTLISTED',
+                         event_key=f'placement_shortlisted:{drive.id}:{usn}',
+                         route=f'/student/placements/{drive.id}',
+                         related_entity_type='placement_drive', related_entity_id=drive.id)
+            db.commit()
         except Exception:
             db.rollback()
             raise
         finally:
             db.close()
 
-    def _notify(self, db, title, message, usn=None, role=None, dept=None):
-        db.add(Notification(usn=usn, audience_role=role, dept_code=dept,
-                            title=title, message=message,
-                            source_agent=self.name))
+    def _notify(self, db, title, message, usn=None, role=None, dept=None,
+                notification_type='GENERAL', event_key=None, route=None,
+                related_entity_type=None, related_entity_id=None):
+        options = dict(title=title, message=message, notification_type=notification_type,
+                       source_agent=self.name,
+                       event_key=event_key or f'{notification_type.lower()}:{uuid.uuid4()}',
+                       route=route, related_entity_type=related_entity_type,
+                       related_entity_id=related_entity_id)
+        if usn:
+            return notify_usns(db, [usn], **options)
+        if role:
+            return notify_role(db, role, dept=dept, **options)
+        return 0
 
     async def on_attendance_updated(self, payload: dict):
         db = self.session()
@@ -129,19 +144,10 @@ class NotificationAgent(BaseAgent):
         finally:
             db.close()
 
-    def for_user(self, db, usn=None, role=None, dept=None, limit=15) -> list[dict]:
-        q = db.query(Notification).order_by(Notification.created_at.desc())
-        conds = []
-        from sqlalchemy import and_, or_
-        if usn:
-            conds.append(Notification.usn == usn)
-        if role:
-            conds.append(and_(Notification.audience_role == role,
-                              or_(Notification.dept_code.is_(None),
-                                  Notification.dept_code == dept)))
-        if conds:
-            q = q.filter(or_(*conds))
-        return [{"id": n.id, "title": n.title, "message": n.message,
-                 "source_agent": n.source_agent, "at": n.created_at,
-                 "read": n.read}
-                for n in q.limit(limit).all()]
+    def for_user(self, db, user_id=None, limit=50, offset=0) -> list[dict]:
+        if user_id is None:
+            return []
+        rows = (db.query(Notification).filter(Notification.recipient_user_id == user_id)
+                .order_by(Notification.created_at.desc(), Notification.id.desc())
+                .offset(offset).limit(limit).all())
+        return [serialize(row) for row in rows]

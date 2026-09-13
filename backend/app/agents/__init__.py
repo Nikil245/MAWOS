@@ -17,6 +17,7 @@ from .finance import FinanceAgent
 from .notification import NotificationAgent
 from .orchestrator import OrchestratorAgent
 from .placement import PlacementAgent
+from .library import LibraryAgent
 from .timetable import TimetableAgent
 
 #: The four that meet the pre-registered agent criterion (plan §7).
@@ -34,7 +35,7 @@ def get_agents() -> dict:
         registry = {}
         for cls in (AdmissionAgent, TimetableAgent, AcademicAgent,
                     AttendanceAgent, FinanceAgent, EligibilityAgent,
-                    PlacementAgent, NotificationAgent):
+                    PlacementAgent, NotificationAgent, LibraryAgent):
             agent = cls(bus)
             registry[agent.name] = agent
         registry["orchestrator_agent"] = OrchestratorAgent(bus, registry)

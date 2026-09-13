@@ -190,6 +190,30 @@ production.
 | Principal | `principal` / `principal123` | institution-wide analytics: department comparison, fee collection, placements, admissions funnel |
 | Admin | `admin` / `admin123` | **full admissions pipeline** (verify → merit rank → allot seats vs intake → enrol), demo cascade trigger |
 
+### Private placement documents and lifecycle maintenance
+
+Placement job-description PDFs are stored outside public/static assets. Local
+development defaults to `runtime/placement-documents`; Docker mounts the
+non-public `placement_documents` named volume at
+`/var/lib/mawos/placement-documents`. Configure the limit with
+`MAWOS_PLACEMENT_DOCUMENT_MAX_BYTES` (default 10 MiB). Back up PostgreSQL and
+this document volume as one recovery set: PostgreSQL contains only opaque keys
+and metadata, not the PDF bytes. Restore both to the same recovery point.
+
+Schema migration and legacy status reconciliation are separate, explicit
+operator actions. After a verified backup, migrate first, preview the repair,
+then apply it. The repair changes only `OPEN` drives that already have
+shortlist rows to `SHORTLIST_GENERATED` and writes an audit event; it is
+idempotent and never runs at startup:
+
+```bash
+MAWOS_ENV=production MAWOS_DATABASE_MODE=external alembic upgrade 20260912_placement_details
+python scripts/reconcile_placement_statuses.py --database-url "$MAWOS_DATABASE_URL"
+python scripts/reconcile_placement_statuses.py --database-url "$MAWOS_DATABASE_URL" --apply --confirm-database mawos
+```
+
+**Do not run these live commands without a verified database and document-volume backup.**
+
 Any USN from `4MT23AI001`–`4MT26CV6xx` works as a student login; faculty are
 `{dept}.f02`…`{dept}.f15`; HODs are `hod.{dept}` for aiml/cse/ece/me/cv.
 
@@ -638,3 +662,11 @@ and is not F5 — same caveats as this paragraph travel with it.
   data exists.
 - Data is synthetic (UCI-calibrated, copula, 3% label noise); the bus is
   in-process and at-most-once; replay recovery is manual.
+
+### Physical Library Agent
+
+Student catalogue/reservations/slips/returns, librarian counter workflows, in-person
+library fines, Admin librarian management, and linked-child Parent summaries are
+implemented in the current React/FastAPI application. See [Library operations and
+acceptance guide](docs/LIBRARY.md) for policy settings, the manual additive migration,
+expiry maintenance, endpoint access and the exact browser checklist.

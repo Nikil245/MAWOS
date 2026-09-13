@@ -31,6 +31,13 @@ export function AuthProvider({ children }) {
     setToken(data.token); setUser({ ...data.user, ai_mode: data.ai_mode });
     return data.user;
   };
+  const changePassword = async (current_password, new_password) => {
+    await api.changePassword(token, { current_password, new_password });
+    const next = { ...user, must_change_password: false };
+    localStorage.setItem(USER_KEY, JSON.stringify(next));
+    setUser(next);
+    return next;
+  };
 
   useEffect(() => {
     if (!token || user) { setChecking(false); return; }
@@ -39,7 +46,7 @@ export function AuthProvider({ children }) {
       .finally(() => setChecking(false));
   }, [token, user]);
 
-  const value = useMemo(() => ({ token, user, checking, login, logout: clear }), [token, user, checking]);
+  const value = useMemo(() => ({ token, user, checking, login, changePassword, logout: clear }), [token, user, checking]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

@@ -45,12 +45,17 @@ def test_migration_upgrade_downgrade_upgrade_preserves_legacy_and_new_rows(pg_en
     spec = importlib.util.spec_from_file_location('placement_migration', path)
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
+    details_path = Path(__file__).resolve().parents[1] / 'alembic/versions/20260912_placement_details.py'
+    details_spec = importlib.util.spec_from_file_location('placement_details_migration', details_path)
+    details = importlib.util.module_from_spec(details_spec)
+    details_spec.loader.exec_module(details)
     with pg_engine.connect() as conn:
         transaction = conn.begin()
         schema = 'placement_migration_' + uuid.uuid4().hex
         conn.execute(text(f'CREATE SCHEMA {schema}'))
         conn.execute(text(f'SET LOCAL search_path TO {schema}'))
         conn.execute(text('CREATE TABLE students (usn varchar(16) PRIMARY KEY)'))
+        conn.execute(text('CREATE TABLE users (id serial PRIMARY KEY)'))
         conn.execute(text('''CREATE TABLE placement_drives (id serial PRIMARY KEY,
             company varchar(128) NOT NULL, role varchar(128) NOT NULL,
             package_lpa float NOT NULL, min_cgpa float NOT NULL DEFAULT 6,
@@ -68,20 +73,49 @@ def test_migration_upgrade_downgrade_upgrade_preserves_legacy_and_new_rows(pg_en
         try:
             with Operations.context(context):
                 migration.upgrade()
+                details.upgrade()
                 assert conn.execute(text('SELECT status FROM placement_drives')).scalar_one() == 'OPEN'
                 assert conn.execute(text('SELECT requires_fee_clearance FROM placement_drives')).scalar_one() is False
                 conn.execute(text("INSERT INTO placement_outcomes(drive_id, usn, outcome_status, decided_at, updated_at) VALUES (1, 'PG4', 'OFFER_ACCEPTED', now(), now())"))
+                conn.execute(text("UPDATE placement_drives SET description='Preserved details', application_url='https://example.com/jobs/1'"))
+                details.downgrade()
                 migration.downgrade()
                 migration.upgrade()
+                details.upgrade()
             assert conn.execute(text('SELECT reasons FROM placement_shortlists')).scalar_one() == 'legacy reason'
             assert conn.execute(text('SELECT outcome_status FROM placement_outcomes')).scalar_one() == 'OFFER_ACCEPTED'
             assert conn.execute(text('SELECT company FROM placement_drives')).scalar_one() == 'Existing'
+            assert conn.execute(text('SELECT description FROM placement_drives')).scalar_one() == 'Preserved details'
             assert conn.execute(text('SELECT count(*) FROM placement_shortlists')).scalar_one() == 1
             from sqlalchemy import inspect
             assert {'ix_placement_drive_status_date'} <= {i['name'] for i in inspect(conn).get_indexes('placement_drives')}
             assert any(set(c['column_names']) == {'drive_id', 'usn'} for c in inspect(conn).get_unique_constraints('placement_outcomes'))
         finally:
             transaction.rollback()
+
+
+def test_legacy_status_reconciliation_is_scoped_audited_and_idempotent(pg_engine):
+    path = Path(__file__).resolve().parents[1] / 'scripts/reconcile_placement_statuses.py'
+    spec = importlib.util.spec_from_file_location('placement_reconcile', path)
+    command = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(command)
+    schema = 'placement_reconcile_' + uuid.uuid4().hex
+    with pg_engine.connect() as conn:
+        transaction = conn.begin()
+        conn.execute(text(f'CREATE SCHEMA {schema}'))
+        conn.execute(text(f'SET LOCAL search_path TO {schema}'))
+        Base.metadata.create_all(conn)
+        conn.execute(text("INSERT INTO departments(code,name,intake) VALUES ('AIML','AI',1)"))
+        conn.execute(text("INSERT INTO students(usn,name,dept_code,year,semester,section,cgpa,backlogs,category,family_income,admission_year,status,is_synthetic) VALUES ('PG4','Test','AIML',4,8,'A',8,0,'GM',0,2023,'enrolled',true)"))
+        conn.execute(text("INSERT INTO placement_drives(company,role,package_lpa,min_cgpa,max_backlogs,min_attendance,drive_date,departments,status) VALUES ('Open with rows','Engineer',8,6,0,75,current_date,'ALL','OPEN'),('Open empty','Engineer',8,6,0,75,current_date,'ALL','OPEN'),('Draft','Engineer',8,6,0,75,current_date,'ALL','DRAFT'),('Closed','Engineer',8,6,0,75,current_date,'ALL','CLOSED')"))
+        conn.execute(text("INSERT INTO placement_shortlists(drive_id,usn,eligible,reasons) VALUES (1,'PG4',true,'unchanged')"))
+        assert command.reconcile(conn) == [1]
+        assert command.reconcile(conn) == []
+        statuses = dict(conn.execute(text('SELECT company,status FROM placement_drives')).all())
+        assert statuses == {'Open with rows': 'SHORTLIST_GENERATED', 'Open empty': 'OPEN', 'Draft': 'DRAFT', 'Closed': 'CLOSED'}
+        assert conn.execute(text("SELECT count(*) FROM workflow_events WHERE topic='placement.status_reconciled'")).scalar_one() == 1
+        assert conn.execute(text('SELECT reasons FROM placement_shortlists')).scalar_one() == 'unchanged'
+        transaction.rollback()
 
 
 def test_concurrent_shortlists_and_single_offer_acceptance(pg_engine):

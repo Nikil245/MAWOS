@@ -25,14 +25,76 @@ class NotificationItemResponse(BaseModel):
     id: int
     title: str
     message: str
+    notification_type: str
+    route: str | None = None
+    related_entity_type: str | None = None
+    related_entity_id: str | None = None
     source_agent: str
+    created_at: dt.datetime
     at: dt.datetime
     read: bool
+    read_at: dt.datetime | None = None
 
 
 class NotificationListResponse(BaseModel):
     notifications: list[NotificationItemResponse] = Field(default_factory=list)
     unread_count: int = 0
+
+
+class ParentChildResponse(BaseModel):
+    usn: str
+    name: str
+    department: str
+    year: int
+    semester: int
+    section: str
+    relationship: str | None = None
+    is_primary: bool | None = None
+    mapping_id: int | None = None
+    active: bool | None = None
+
+
+class ParentProfileResponse(BaseModel):
+    id: int
+    name: str
+    email: str | None = None
+    mobile: str | None = None
+    children: list[ParentChildResponse] = Field(default_factory=list)
+
+
+class GeneratedCredentialsResponse(BaseModel):
+    username: str
+    temporary_password: str
+
+
+class AdminParentResponse(BaseModel):
+    id: int
+    full_name: str
+    username: str
+    email: str | None = None
+    mobile: str | None = None
+    active: bool
+    created_at: dt.datetime
+    students: list[ParentChildResponse] = Field(default_factory=list)
+    generated_credentials: GeneratedCredentialsResponse | None = None
+
+
+class AdminParentListResponse(BaseModel):
+    parents: list[AdminParentResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class ParentDashboardResponse(BaseModel):
+    library: dict[str, Any] = Field(default_factory=dict)
+    child: ParentChildResponse
+    attendance: dict[str, Any] = Field(default_factory=dict)
+    marks: dict[str, Any] = Field(default_factory=dict)
+    fees: dict[str, Any] = Field(default_factory=dict)
+    exams: dict[str, Any] = Field(default_factory=dict)
+    timetable: dict[str, Any] = Field(default_factory=dict)
+    scholarship: dict[str, Any] = Field(default_factory=dict)
+    placements: list[dict[str, Any]] = Field(default_factory=list)
+    events: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ChatRoutingResponse(BaseModel):

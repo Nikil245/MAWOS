@@ -103,5 +103,6 @@ Thumbs.db
 # Local uploads and generated runtime files
 uploads/
 runtime/
+placement-documents/
 
 mawos_schema.sql

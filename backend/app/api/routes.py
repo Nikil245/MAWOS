@@ -6,7 +6,7 @@ import math
 from typing import Literal
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import SQLAlchemyError
@@ -15,12 +15,14 @@ from sqlalchemy.orm import Session
 from .. import llm, metrics
 from ..agents import get_agents
 from ..agents import tools as assistant_tools
-from ..auth import create_token, get_current_user, require_role, verify_password
+from ..auth import (create_token, get_authenticated_user, get_current_user,
+                    hash_password, require_role, verify_password)
 from ..database import get_session
 from ..models import (Department, HallTicket, Notification, ScholarshipAssessment, Student,
                       TeachingAssignment, User, Faculty, Scholarship,
-                      ScholarshipApplication)
+                      ScholarshipApplication, utcnow)
 from .. import scholarships
+from ..notifications import mark_read, owned_query
 from ..marks_policy import INTERNALS, MAX_MARKS, assessments
 from .schemas import (
     AdminAdmissionsResponse,
@@ -41,6 +43,7 @@ from .schemas import (
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
+EXISTING_PORTAL_ROLES = ("student", "faculty", "hod", "principal", "admin")
 
 
 # ---------- auth ------------------------------------------------------------
@@ -54,10 +57,21 @@ def login(body: LoginRequest, db: Session = Depends(get_session)):
     user = db.query(User).filter(User.username == body.username.strip()).first()
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if user.role == "librarian":
+        from ..models import LibrarianAccount
+        account = db.get(LibrarianAccount, user.id)
+        if account is None or not account.active:
+            raise HTTPException(status_code=403, detail="Librarian account is inactive")
+    if user.role == "parent":
+        from ..models import Parent
+        parent = db.query(Parent).filter(Parent.user_id == user.id).one_or_none()
+        if parent is None or not parent.active:
+            raise HTTPException(status_code=403, detail="Parent account is inactive")
     return {"token": create_token(user),
             "user": {"username": user.username, "role": user.role,
                      "name": user.display_name, "usn": user.usn,
-                     "dept": user.dept_code},
+                     "dept": user.dept_code,
+                     "must_change_password": bool(user.must_change_password)},
             # Login never probes Ollama: startup/login stay independent of a
             # local optional service. Chat checks it only when escalation is
             # warranted.
@@ -66,35 +80,64 @@ def login(body: LoginRequest, db: Session = Depends(get_session)):
 
 
 @router.get("/me")
-def me(user: User = Depends(get_current_user)):
+def me(user: User = Depends(get_authenticated_user)):
     return {"username": user.username, "role": user.role,
             "name": user.display_name, "usn": user.usn, "dept": user.dept_code,
+            "must_change_password": bool(user.must_change_password),
             "ai_mode": "llm" if llm.runtime_status()["available"] else "lexicon",
             "runtime_model": llm.runtime_status()["runtime_model"]}
+
+
+class PasswordChangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=10, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def strong_password(cls, value):
+        if not (any(char.isalpha() for char in value)
+                and any(char.isdigit() for char in value)):
+            raise ValueError("New password must contain letters and numbers")
+        return value
+
+
+@router.post("/auth/change-password")
+def change_password(body: PasswordChangeRequest,
+                    user: User = Depends(get_authenticated_user),
+                    db: Session = Depends(get_session)):
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if body.current_password == body.new_password:
+        raise HTTPException(status_code=422, detail="New password must be different")
+    user.password_hash = hash_password(body.new_password)
+    user.must_change_password = False
+    db.commit()
+    return {"changed": True, "must_change_password": False}
 
 
 # ---------- notifications ----------------------------------------------------
 @router.get("/notifications", response_model=NotificationListResponse)
 def notifications(user: User = Depends(get_current_user),
-                  db: Session = Depends(get_session)):
+                  db: Session = Depends(get_session),
+                  limit: int = Query(50, ge=1, le=100),
+                  offset: int = Query(0, ge=0)):
     """Return only notifications addressed to the authenticated database user."""
     items = get_agents()["notification_agent"].for_user(
-        db, usn=user.usn, role=user.role, dept=user.dept_code)
+        db, user_id=user.id, limit=limit, offset=offset)
     return NotificationListResponse(
         notifications=items,
-        unread_count=sum(1 for item in items if not item["read"]),
+        unread_count=owned_query(db, user).filter(Notification.read.is_(False)).count(),
     )
 
 
 def _visible_notification_query(db, user):
-    from sqlalchemy import and_, or_
-    conditions = []
-    if user.usn:
-        conditions.append(Notification.usn == user.usn)
-    if user.role:
-        conditions.append(and_(Notification.audience_role == user.role,
-                               or_(Notification.dept_code.is_(None), Notification.dept_code == user.dept_code)))
-    return db.query(Notification).filter(or_(*conditions)) if conditions else db.query(Notification).filter(False)
+    return owned_query(db, user)
+
+
+@router.get("/notifications/unread-count")
+def notification_unread_count(user: User = Depends(get_current_user), db: Session = Depends(get_session)):
+    return {"unread_count": owned_query(db, user).filter(Notification.read.is_(False)).count()}
 
 
 @router.patch("/notifications/{notification_id}/read")
@@ -103,7 +146,7 @@ def mark_notification_read(notification_id: int, user: User = Depends(get_curren
     if row is None:
         raise HTTPException(404, "Notification not found")
     try:
-        row.read = True
+        mark_read(row)
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
@@ -115,7 +158,9 @@ def mark_notification_read(notification_id: int, user: User = Depends(get_curren
 @router.post("/notifications/read-all")
 def mark_all_notifications_read(user: User = Depends(get_current_user), db: Session = Depends(get_session)):
     try:
-        changed = _visible_notification_query(db, user).filter(Notification.read.is_(False)).update({Notification.read: True}, synchronize_session=False)
+        now = utcnow()
+        changed = _visible_notification_query(db, user).filter(Notification.read.is_(False)).update(
+            {Notification.read: True, Notification.read_at: now}, synchronize_session=False)
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
@@ -126,7 +171,7 @@ def mark_all_notifications_read(user: User = Depends(get_current_user), db: Sess
 
 # ---------- assistant ---------------------------------------------------------
 @router.get("/assistant/capabilities", response_model=AssistantCapabilitiesResponse)
-def assistant_capabilities(user: User = Depends(get_current_user)):
+def assistant_capabilities(user: User = Depends(require_role(*EXISTING_PORTAL_ROLES))):
     return assistant_tools.assistant_capabilities(user.role, user.display_name)
 
 
@@ -171,7 +216,7 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(body: ChatRequest, user: User = Depends(get_current_user),
+async def chat(body: ChatRequest, user: User = Depends(require_role(*EXISTING_PORTAL_ROLES)),
                db: Session = Depends(get_session)):
     return await get_agents()["orchestrator_agent"].handle_chat(
         db, user, body.message, context_topic=body.context_topic,
@@ -190,7 +235,9 @@ def student_dashboard(user: User = Depends(require_role("student")),
     ht = db.query(HallTicket).filter_by(usn=user.usn).first()
     s = db.get(Student, user.usn)
     workflow_scholarship = scholarships.student_summary(db, s)
+    from ..library.service import summary as library_summary
     return {
+        "library": library_summary(db, user.usn),
         "profile": profile,
         "attendance": {
             "overall": overall_percentage(db, user.usn),
@@ -206,7 +253,7 @@ def student_dashboard(user: User = Depends(require_role("student")),
         "timetable": timetable_reads.grid(db, s.dept_code, s.year, s.section, semester=s.semester),
         "exams": agents["eligibility_agent"].schedule_for(db, s.dept_code, s.semester),
         "notifications": agents["notification_agent"].for_user(
-            db, usn=user.usn),
+            db, user_id=user.id),
     }
 
 
@@ -256,7 +303,7 @@ def faculty_overview(user: User = Depends(require_role("faculty", "hod")),
     return {"assignments": assignments,
             "timetable": timetable_reads.grid(db, faculty_id=user.faculty_id),
             "notifications": agents["notification_agent"].for_user(
-                db, role=user.role, dept=user.dept_code)}
+                db, user_id=user.id)}
 
 
 @router.get("/faculty/roster/{dept}/{year}/{section}")
@@ -555,14 +602,14 @@ async def simulate_day(user: User = Depends(require_role("admin")),
 
 # ---------- system / research views ---------------------------------------------------------
 @router.get("/departments")
-def departments(user: User = Depends(get_current_user),
+def departments(user: User = Depends(require_role(*EXISTING_PORTAL_ROLES)),
                 db: Session = Depends(get_session)):
     return {"departments": [{"code": d.code, "name": d.name, "intake": d.intake}
                             for d in db.query(Department).all()]}
 
 
 @router.get("/agents")
-def list_agents(user: User = Depends(get_current_user)):
+def list_agents(user: User = Depends(require_role(*EXISTING_PORTAL_ROLES))):
     return {"agents": [{"name": a.name, "description": a.description}
                        for a in get_agents().values()],
             "ai_mode": "llm" if llm.runtime_status()["available"] else "lexicon",
@@ -570,13 +617,13 @@ def list_agents(user: User = Depends(get_current_user)):
 
 
 @router.get("/metrics/summary")
-def metrics_summary(user: User = Depends(get_current_user),
+def metrics_summary(user: User = Depends(require_role(*EXISTING_PORTAL_ROLES)),
                     db: Session = Depends(get_session)):
     return metrics.summary(db)
 
 
 @router.get("/workflows/recent")
-def recent_workflows(limit: int = 8, user: User = Depends(get_current_user),
+def recent_workflows(limit: int = 8, user: User = Depends(require_role(*EXISTING_PORTAL_ROLES)),
                      db: Session = Depends(get_session)):
     from sqlalchemy import func
     from ..models import WorkflowEvent
@@ -595,7 +642,7 @@ def recent_workflows(limit: int = 8, user: User = Depends(get_current_user),
 
 
 @router.get("/workflows/{workflow_id}")
-def workflow_trace(workflow_id: str, user: User = Depends(get_current_user),
+def workflow_trace(workflow_id: str, user: User = Depends(require_role(*EXISTING_PORTAL_ROLES)),
                    db: Session = Depends(get_session)):
     from ..models import WorkflowEvent
     events = (db.query(WorkflowEvent).filter_by(workflow_id=workflow_id)
@@ -706,7 +753,7 @@ def hod_scholarship(scholarship_id: int, user: User = Depends(require_role("hod"
 def request_changes(scholarship_id: int, body: ScholarshipReviewRequest, user: User = Depends(require_role("hod")), db: Session = Depends(get_session)):
     if not body.comment.strip(): raise HTTPException(422, "A comment is required when requesting changes")
     def action():
-        row = _hod_scholarship(db, user, scholarship_id); scholarships._transition(row, "CHANGES_REQUESTED"); row.approval_comment = body.comment.strip(); scholarships._notify(db, "Scholarship changes requested", row.approval_comment, role="faculty", dept=row.department_code); scholarships._event(db, "REQUEST_CHANGES", row, user.username); return scholarships.serialize(row)
+        row = _hod_scholarship(db, user, scholarship_id); scholarships._transition(row, "CHANGES_REQUESTED"); row.approval_comment = body.comment.strip(); scholarships._notify(db, "Scholarship changes requested", row.approval_comment, role="faculty", dept=row.department_code, event_key=f"scholarship_changes:{row.id}:v{row.criteria_version}", route="/faculty/scholarships", related_entity_id=row.id); scholarships._event(db, "REQUEST_CHANGES", row, user.username); return scholarships.serialize(row)
     return _scholarship_write(db, action)
 
 
@@ -714,7 +761,7 @@ def request_changes(scholarship_id: int, body: ScholarshipReviewRequest, user: U
 def reject_scholarship(scholarship_id: int, body: ScholarshipReviewRequest, user: User = Depends(require_role("hod")), db: Session = Depends(get_session)):
     if not body.comment.strip(): raise HTTPException(422, "A rejection reason is required")
     def action():
-        row = _hod_scholarship(db, user, scholarship_id); scholarships._transition(row, "REJECTED"); row.rejection_reason = body.comment.strip(); scholarships._notify(db, "Scholarship rejected", row.rejection_reason, role="faculty", dept=row.department_code); scholarships._event(db, "REJECT", row, user.username); return scholarships.serialize(row)
+        row = _hod_scholarship(db, user, scholarship_id); scholarships._transition(row, "REJECTED"); row.rejection_reason = body.comment.strip(); scholarships._notify(db, "Scholarship rejected", row.rejection_reason, role="faculty", dept=row.department_code, event_key=f"scholarship_rejected:{row.id}", route="/faculty/scholarships", related_entity_id=row.id); scholarships._event(db, "REJECT", row, user.username); return scholarships.serialize(row)
     return _scholarship_write(db, action)
 
 
@@ -726,8 +773,8 @@ def approve_scholarship(scholarship_id: int, body: ScholarshipReviewRequest, use
             raise HTTPException(409, f"Invalid scholarship transition: {row.status} to PUBLISHED")
         assessments = scholarships.evaluate_applicable(db, row, publishing=True)
         for assessment in assessments:
-            if assessment.eligibility_status == "ELIGIBLE": scholarships._notify(db, "Scholarship available", f"You are eligible for {row.name}.", usn=assessment.usn)
-        scholarships._notify(db, "Scholarship published", f"{row.name} was approved and published.", role="faculty", dept=row.department_code)
+            if assessment.eligibility_status == "ELIGIBLE": scholarships._notify(db, "Scholarship available", f"You are eligible for {row.name}.", usn=assessment.usn, event_key=f"scholarship_available:{row.id}:v{row.criteria_version}", route="/student/scholarships", related_entity_id=row.id)
+        scholarships._notify(db, "Scholarship published", f"{row.name} was approved and published.", role="faculty", dept=row.department_code, event_key=f"scholarship_published:{row.id}:v{row.criteria_version}", route="/faculty/scholarships", related_entity_id=row.id)
         scholarships._event(db, "APPROVE", row, user.username); scholarships._event(db, "PUBLISH", row, user.username)
         row.status = "PUBLISHED"; row.approved_by_hod_id = user.faculty_id; row.approval_comment = body.comment.strip(); row.published_at = scholarships.utcnow()
         db.flush()
@@ -767,5 +814,13 @@ def apply_scholarship(scholarship_id: int, body: ScholarshipApplyRequest, user: 
         assessment = db.query(ScholarshipAssessment).filter_by(scholarship_id=row.id, usn=user.usn, criteria_version=row.criteria_version).first()
         if not assessment or assessment.eligibility_status != "ELIGIBLE": raise HTTPException(409, "Only eligible students may apply")
         if db.query(ScholarshipApplication).filter_by(scholarship_id=row.id, student_usn=user.usn).first(): raise HTTPException(409, "Application already exists")
-        application = ScholarshipApplication(scholarship_id=row.id, student_usn=user.usn, external_reference=body.external_reference.strip()); db.add(application); scholarships._event(db, "APPLY", row, user.username); return scholarships.serialize(row, assessment, application)
+        application = ScholarshipApplication(scholarship_id=row.id, student_usn=user.usn, external_reference=body.external_reference.strip())
+        db.add(application); db.flush()
+        scholarships._notify(
+            db, "Scholarship application submitted",
+            f"Your application for {row.name} was submitted successfully.", usn=user.usn,
+            notification_type="SCHOLARSHIP_APPLICATION", event_key=f"scholarship_application:{application.id}",
+            route="/student/scholarships", related_entity_id=row.id)
+        scholarships._event(db, "APPLY", row, user.username)
+        return scholarships.serialize(row, assessment, application)
     return _scholarship_write(db, action)

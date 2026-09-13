@@ -4,6 +4,7 @@ import { api } from '../../services/api';
 import { useApi } from '../../hooks/useApi';
 import { ChartCard } from '../../components/ChartCard';
 import { DashboardCard, DataTable, EmptyState, ErrorState, LoadingSkeleton, PageHeader, StatCard, StatusBadge } from '../../components/ui';
+import { CampusEventsCard } from '../shared/CampusEvents';
 
 const isRecord = (value) => value && typeof value === 'object' && !Array.isArray(value);
 const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -61,6 +62,7 @@ export default function PrincipalDashboard() {
       <StatCard label="Eligible finalists" value={placements?.eligible_finalists ?? '—'} detail={placements ? `${placements.upcoming_drives} upcoming drive(s)` : 'Placement metrics unavailable: invalid API response.'} icon={CircleDollarSign} tone={placements ? 'green' : 'amber'} />
     </div>
     <div className="mt-4 grid gap-4 xl:grid-cols-2">
+      <CampusEventsCard className="xl:col-span-2" />
       <ChartCard title="Department attendance comparison" data={departments.map((dept) => ({ name: dept.dept, value: dept.avg_attendance }))} />
       {admissionStages ? <ChartCard title="Admissions funnel" type="donut" data={Object.entries(admissionStages).map(([name, value]) => ({ name, value }))} /> : <DashboardCard title="Admissions funnel"><p role="status" className="text-sm text-red-700">Admissions metrics are unavailable because the API response is incomplete.</p></DashboardCard>}
       <DashboardCard title="Department readiness" className="xl:col-span-2">
@@ -75,7 +77,7 @@ export default function PrincipalDashboard() {
       <DashboardCard title="Financial overview">
         {finance ? <><p className="text-2xl font-bold">₹{finance.total_collected.toLocaleString()}</p><p className="mt-1 text-sm text-muted">Fee collection recorded by Finance Agent</p><p className="mt-4 text-sm">Outstanding: <b>₹{finance.total_outstanding.toLocaleString()}</b></p></> : <p role="status" className="text-sm text-red-700">Financial metrics are unavailable because the API response is incomplete.</p>}
       </DashboardCard>
-      <DashboardCard title="Institution controls"><p className="text-sm text-muted">NAAC/NBA, DPDP, API quota, latency, library and event detail are not exposed by current FastAPI routes. This page deliberately does not infer those values.</p></DashboardCard>
+      <DashboardCard title="Institution controls"><p className="text-sm text-muted">NAAC/NBA, DPDP, API quota, latency, and library details are not exposed by current FastAPI routes. This page deliberately does not infer those values.</p></DashboardCard>
     </div>
   </>;
 }

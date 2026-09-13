@@ -11,7 +11,7 @@ DOCKER_URL = "postgresql+psycopg://mawos_app:test-password@host.docker.internal:
 
 def _compose(env):
     return subprocess.run(
-        ["docker", "compose", "config"], cwd=ROOT, env=env,
+        ["docker", "compose", "--env-file", "/dev/null", "config"], cwd=ROOT, env=env,
         text=True, capture_output=True, check=False,
     )
 

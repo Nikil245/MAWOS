@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from backend.app.auth import create_token
+from backend.app.models import Notification
 from backend.app.database import Base, get_session
 from backend.app.main import app
 from backend.app.timetable import api as timetable_api, models as m, service as s, reads
@@ -59,6 +60,9 @@ def test_complete_draft_is_not_published_until_explicit_action(setup):
     assert request(d, 'get', '/api/student/timetable', 'student').json()['published'] is False
     response = request(d, 'post', f"/api/hod/timetable/runs/{run['id']}/publish")
     assert response.status_code == 200 and response.json()['status'] == 'PUBLISHED'
+    notices = d['db'].query(Notification).filter_by(notification_type='TIMETABLE_PUBLISHED').all()
+    assert {notice.recipient_user_id for notice in notices} == {
+        d['users']['student'].id, d['users']['faculty'].id}
     weekly = request(d, 'get', '/api/student/timetable', 'student').json()
     assert weekly['published'] and len(weekly['weekly']) == 4
     assert weekly['weekly'][0]['faculty'] == 'Qualified Teacher'

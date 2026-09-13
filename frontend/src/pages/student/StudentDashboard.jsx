@@ -1,16 +1,14 @@
 import { useState } from "react";
 import {
-  BookOpen,
   CalendarCheck,
   CreditCard,
   Download,
   GraduationCap,
-  Landmark,
   Trophy,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../services/api";
-import { unavailableStudentServices } from "../../data/mockAdapter";
+import { LibrarySummaryCard } from "../library/Library";
 import {
   DashboardCard,
   ErrorState,
@@ -23,6 +21,7 @@ import {
 import { ChartCard } from "../../components/ChartCard";
 import { useApi } from "../../hooks/useApi";
 import MarksPerformance from "./MarksPerformance";
+import { CampusEventsCard } from "../shared/CampusEvents";
 
 const reasonCode = (reasons = "") =>
   reasons.split(/[,;]|\band\b/i).map((reason, index) => (
@@ -241,25 +240,8 @@ export default function StudentDashboard() {
             ))}
           </div>
         </DashboardCard>
-        <DashboardCard title="Library">
-          <BookOpen className="text-primary" size={22} />
-          <p className="mt-3 text-sm font-medium">
-            {unavailableStudentServices.library.issued} issued books · ₹
-            {unavailableStudentServices.library.fine} fine
-          </p>
-          <p className="mt-1 text-xs text-muted">
-            {unavailableStudentServices.library.note}
-          </p>
-        </DashboardCard>
-        <DashboardCard title="Today’s event">
-          <Landmark className="text-teal" size={22} />
-          <p className="mt-3 text-sm font-medium">
-            {unavailableStudentServices.event.title}
-          </p>
-          <p className="mt-1 text-xs text-muted">
-            {unavailableStudentServices.event.note}
-          </p>
-        </DashboardCard>
+        <LibrarySummaryCard data={data.library} />
+        <CampusEventsCard />
         <DashboardCard title="Internal marks" className="xl:col-span-2">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

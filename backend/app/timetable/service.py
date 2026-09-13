@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from ..models import Department, Faculty, Student, Subject, TeachingAssignment
+from ..notifications import notify_role
 from . import contracts as c, models as m
 from .validation import preflight, validate
 
@@ -279,4 +280,13 @@ def publish(db, user, run_id):
         run.status, run.published_by, run.published_at = 'PUBLISHED', user.id, m.now()
         run.validated_by, run.validated_at = user.id, m.now()
         audit(db, user, 'timetable.published', run=run)
+        term_row = term(db, run.term_id)
+        common = dict(
+            title='Timetable published',
+            message=f'{term_row.name} timetable version {run.id} is now published for {run.dept_code}.',
+            notification_type='TIMETABLE_PUBLISHED', source_agent='timetable_service',
+            event_key=f'timetable_published:{run.id}',
+            related_entity_type='timetable_run', related_entity_id=run.id)
+        notify_role(db, 'student', dept=run.dept_code, route='/student/timetable', **common)
+        notify_role(db, 'faculty', dept=run.dept_code, route='/faculty/timetable', **common)
     return describe_run(db, run)

@@ -7,7 +7,7 @@ import PrincipalDashboard from '../pages/principal/PrincipalDashboard';
 import { api } from '../services/api';
 
 vi.mock('../services/api', () => ({
-  api: { principalAnalytics: vi.fn(), admissions: vi.fn(), adminAction: vi.fn() },
+  api: { principalAnalytics: vi.fn(), admissions: vi.fn(), adminAction: vi.fn(), campusEvents: vi.fn() },
   setUnauthorizedHandler: vi.fn(),
   ApiError: class ApiError extends Error {},
 }));
@@ -46,7 +46,7 @@ function renderDashboard(component, role) {
 }
 
 describe('dashboard API contracts', () => {
-  beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
+  beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); api.campusEvents.mockResolvedValue({ today: [], upcoming: [], events: [] }); });
 
   it('renders Principal analytics from multiple department rows without the error boundary', async () => {
     api.principalAnalytics.mockResolvedValue(principalData);

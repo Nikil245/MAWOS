@@ -5,10 +5,10 @@ admissions pipeline, timetables, marks, and the v1 research spine
 import datetime as dt
 
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer,
-    String, Text, UniqueConstraint, CheckConstraint, Index, func,
+    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, Time,
+    String, Text, UniqueConstraint, CheckConstraint, Index, func, text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, relationship as orm_relationship
 
 from .database import Base
 
@@ -26,14 +26,52 @@ class Department(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (CheckConstraint(
+        "role IN ('student','faculty','hod','principal','admin','parent','librarian')",
+        name="ck_users_role"),)
     id = Column(Integer, primary_key=True)
     username = Column(String(64), unique=True, nullable=False, index=True)
     password_hash = Column(String(256), nullable=False)
-    role = Column(String(16), nullable=False)  # student|faculty|hod|principal|admin
+    role = Column(String(16), nullable=False)  # student|faculty|hod|principal|admin|parent|librarian
     display_name = Column(String(128), nullable=False)
     usn = Column(String(16), ForeignKey("students.usn"), nullable=True)
     faculty_id = Column(Integer, ForeignKey("faculty.id"), nullable=True)
     dept_code = Column(String(8), ForeignKey("departments.code"), nullable=True)
+    must_change_password = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+
+
+class Parent(Base):
+    __tablename__ = "parents"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    full_name = Column(String(128), nullable=False)
+    email = Column(String(128), nullable=True, unique=True)
+    mobile = Column(String(20), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now())
+    active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    user = relationship("User")
+
+
+class ParentStudent(Base):
+    __tablename__ = "parent_students"
+    __table_args__ = (
+        CheckConstraint("relationship IN ('Father','Mother','Guardian','Other')",
+                        name="ck_parent_students_relationship"),
+        Index("uq_parent_students_active", "parent_id", "student_usn", unique=True,
+              postgresql_where=text("active = true"), sqlite_where=text("active = 1")),
+        Index("ix_parent_students_student_active", "student_usn", "active"),
+    )
+    id = Column(Integer, primary_key=True)
+    parent_id = Column(Integer, ForeignKey("parents.id"), nullable=False, index=True)
+    student_usn = Column(String(16), ForeignKey("students.usn"), nullable=False)
+    relationship = Column(String(16), nullable=False)
+    is_primary = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now())
+    parent = orm_relationship("Parent")
+    student = orm_relationship("Student")
 
 
 class Student(Base):
@@ -278,6 +316,16 @@ class PlacementDrive(Base):
     status = Column(String(24), nullable=False, default="OPEN", server_default="OPEN")
     requires_fee_clearance = Column(Boolean, nullable=False, default=False, server_default="false")
     application_deadline = Column(Date, nullable=True)
+    description = Column(Text, nullable=True)
+    application_url = Column(String(2048), nullable=True)
+    job_document_storage_key = Column(String(128), nullable=True)
+    job_document_original_name = Column(String(255), nullable=True)
+    job_document_content_type = Column(String(128), nullable=True)
+    job_document_size_bytes = Column(Integer, nullable=True)
+    job_document_sha256 = Column(String(64), nullable=True)
+    job_document_uploaded_at = Column(DateTime, nullable=True)
+    job_document_uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    cancellation_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now())
 
@@ -314,16 +362,55 @@ class PlacementOutcome(Base):
 
 class Notification(Base):
     __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("recipient_user_id", "event_key", name="uq_notification_recipient_event"),
+        Index("ix_notifications_recipient_unread_created", "recipient_user_id", "created_at",
+              postgresql_where=text("read = false"), sqlite_where=text("read = 0")),
+    )
     id = Column(Integer, primary_key=True)
+    # ``usn`` / audience fields are retained for old rows.  Every new row is
+    # owned by one authenticated user so read state can never leak across an
+    # audience shared by several people.
+    recipient_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     usn = Column(String(16), nullable=True, index=True)
     audience_role = Column(String(16), nullable=True)
     dept_code = Column(String(8), nullable=True)
     channel = Column(String(16), nullable=False, default="in-app")
     title = Column(String(256), nullable=False)
     message = Column(Text, nullable=False)
+    notification_type = Column(String(64), nullable=False, default="GENERAL", server_default="GENERAL")
+    route = Column(String(512), nullable=True)
+    related_entity_type = Column(String(64), nullable=True)
+    related_entity_id = Column(String(64), nullable=True)
+    event_key = Column(String(255), nullable=True)
     source_agent = Column(String(32), nullable=False)
-    created_at = Column(DateTime, default=utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
     read = Column(Boolean, nullable=False, default=False)
+    read_at = Column(DateTime, nullable=True)
+
+
+class CampusEvent(Base):
+    __tablename__ = "campus_events"
+    __table_args__ = (
+        CheckConstraint("status IN ('DRAFT','PUBLISHED','CANCELLED')", name="ck_campus_event_status"),
+        Index("ix_campus_events_status_date", "status", "event_date", "start_time"),
+    )
+    id = Column(Integer, primary_key=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    event_date = Column(Date, nullable=False)
+    start_time = Column(Time, nullable=True)
+    end_time = Column(Time, nullable=True)
+    venue = Column(String(200), nullable=True)
+    organizer = Column(String(200), nullable=True)
+    audience = Column(String(128), nullable=False, default="ALL", server_default="ALL")
+    department_code = Column(String(8), ForeignKey("departments.code"), nullable=True)
+    status = Column(String(16), nullable=False, default="DRAFT", server_default="DRAFT")
+    cancellation_reason = Column(Text, nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow, server_default=func.now())
+    published_at = Column(DateTime, nullable=True)
 
 
 class WorkflowEvent(Base):
@@ -353,3 +440,7 @@ class IntentLog(Base):
 
 # Register the narrowly scoped timetable version/configuration tables.
 from .timetable import models as timetable_models  # noqa: E402,F401
+
+# Library metadata shares the existing migration/session infrastructure.
+from .library.models import (Book, BookDepartment, BookReservation, BookIssue, LibraryFine,
+                             BookReview, LibrarianAccount)  # noqa: E402,F401

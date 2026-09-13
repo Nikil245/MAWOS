@@ -67,9 +67,16 @@ app.include_router(timetable_router)
 app.include_router(router)
 from .placement.api import router as placement_router
 app.include_router(placement_router)
+from .campus_events import router as campus_events_router
+app.include_router(campus_events_router)
+from .parent_portal import router as parent_portal_router
+app.include_router(parent_portal_router)
 
 
 @app.get("/", tags=["service"])
 def service_status():
     """Backend-only health/status endpoint; the React app runs via Vite."""
     return {"service": "MAWOS API", "status": "running", "docs": "/docs"}
+
+from .library.api import router as library_router
+app.include_router(library_router)

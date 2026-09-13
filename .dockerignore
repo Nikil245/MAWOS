@@ -15,6 +15,9 @@ build
 .vite
 **/*.log
 logs
+uploads
+runtime
+placement-documents
 backups
 **/*.backup
 **/*.dump

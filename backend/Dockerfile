@@ -7,6 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN groupadd --system mawos && useradd --system --gid mawos --create-home mawos
 WORKDIR /app
+RUN mkdir -p /var/lib/mawos/placement-documents \
+    && chown -R mawos:mawos /var/lib/mawos
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt && pip check

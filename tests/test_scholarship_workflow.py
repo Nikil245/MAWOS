@@ -186,3 +186,23 @@ def test_wrong_department_hod_cannot_approve(db):
         assert db.get(Scholarship, row.id).status == "PENDING_APPROVAL"
     finally:
         app.dependency_overrides.pop(get_session, None)
+
+
+def test_student_application_creates_owned_notification(db):
+    from fastapi.testclient import TestClient
+    student_user = (db.query(User).filter_by(role="student", usn="4MT23AI001")
+                    .order_by(User.id).first())
+    row = make_scholarship(db, name="Application Notice Grant")
+    scholarships.evaluate(db, row, db.get(Student, student_user.usn)); db.commit()
+    app.dependency_overrides[get_session] = lambda: db
+    try:
+        response = TestClient(app).post(
+            f"/api/student/scholarships/{row.id}/apply", json={"external_reference": "REF-1"},
+            headers={"Authorization": f"Bearer {create_token(student_user)}"})
+        assert response.status_code == 201
+        notice = db.query(Notification).filter_by(
+            recipient_user_id=student_user.id, notification_type="SCHOLARSHIP_APPLICATION").one()
+        assert notice.route == "/student/scholarships"
+        assert notice.related_entity_id == str(row.id)
+    finally:
+        app.dependency_overrides.pop(get_session, None)

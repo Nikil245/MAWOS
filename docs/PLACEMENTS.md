@@ -14,10 +14,11 @@ Existing student dashboard and placement statistics response fields remain
 compatible. Student dashboard reads now use stored results or a read-only
 hard-filter preview. They never score a model or create shortlist records.
 
-The admin page is `/admin/placements`, and the student page is
-`/student/placements`. Routes and navigation are scoped to those roles.
-Authenticated staff may list drive details, but only administrators may access
-full shortlists/outcomes or other students' eligibility through placement APIs.
+The admin list is `/admin/placements`, with shortlist/outcome details at
+`/admin/placements/{id}`. Student cards are at `/student/placements`, with
+own-eligibility drive details at `/student/placements/{id}`. Routes and APIs are
+limited to the student/admin roles; only administrators receive aggregate
+shortlists and outcomes.
 
 ## Evaluation and lifecycle
 
@@ -36,7 +37,10 @@ Drives default to `OPEN`; admins may create `DRAFT`. Editing is limited to
 `DRAFT`/`OPEN`, including opening a draft. Generation accepts only `OPEN` or
 `SHORTLIST_GENERATED` and moves to `SHORTLIST_GENERATED`. Existing shortlist
 rows (including those created by automatic events) require `regenerate=true`.
-Close accepts `OPEN`/`SHORTLIST_GENERATED`; cancel sets `CANCELLED`.
+Close accepts `OPEN`/`SHORTLIST_GENERATED` and means normal completion. Cancel
+accepts `DRAFT`/`OPEN`/`SHORTLIST_GENERATED`, requires a reason, and means the
+drive was withdrawn. Both preserve placement records/documents and block new
+generation and external application actions. Terminal drives are read-only.
 
 Attendance and fee events automatically evaluate active drives dated today
 minus seven days or later. `OFFER_ACCEPTED`, `OFFER_DECLINED`, and `REJECTED`
@@ -80,15 +84,17 @@ All paths below start with `/api/placements` and require a JWT.
 
 | Method and path | Access / action |
 | --- | --- |
-| `GET /drives`, `GET /drives/{id}` | Any authenticated role; counts included in admin list only |
+| `GET /drives`, `GET /drives/{id}` | Student own eligibility / admin; DRAFT is hidden from students |
 | `POST /drives` | Admin create (all required drive fields) |
 | `PUT /drives/{id}` | Admin full editable-drive replacement |
-| `POST /drives/{id}/close`, `/cancel` | Admin explicit lifecycle actions |
+| `POST /drives/{id}/close`, `/cancel` | Admin lifecycle actions; cancel requires `{"reason": "..."}` |
 | `POST /drives/{id}/shortlist` | Admin; JSON `{"regenerate": false}` or explicit `true` |
 | `GET /drives/{id}/shortlist` | Admin ranked shortlist |
 | `GET /drives/{id}/eligibility/{usn}` | Student own USN / admin any student |
 | `PUT /drives/{id}/outcomes/{usn}` | Admin outcome upsert |
 | `GET /drives/{id}/outcomes` | Admin outcomes |
+| `GET /drives/{id}/admin-view` | Admin drive + shortlist + matching outcomes |
+| `POST`, `DELETE`, `GET /drives/{id}/document` | Admin upload/remove; authorized admin/student download |
 
 USNs are trimmed and uppercased. Student cross-USN requests return 403 before
 lookups, even for nonexistent students. Invalid payloads return 422; missing
@@ -119,17 +125,14 @@ an event; explicit regeneration can retry notification delivery.
 
 ## Migration and operational safety
 
-Source revision chain ends in `20260908_timetable` → `20260911_placement`.
-The configured live database could not be reached during read-only inspection;
-its applied revision, placement row counts, and any data issues remain
-unconfirmed. No live schema/data writes were performed.
+Source revision chain ends in `20260908_timetable` → `20260911_placement` →
+`20260912_placement_details`. No live schema/data writes were performed.
 
-The new migration adds drive fields/defaults, status constraints/indexes,
-shortlist model version and the outcome table/unique constraint/index. Existing
-drives get `OPEN`, fee-clearance false and UTC migration-time timestamps (their
-original creation timestamps are unknown). No legacy placements are replaced.
-Existing duplicate shortlist pairs, if uniqueness was absent, cause a controlled
-migration failure for administrator review; nothing is deleted or deduplicated.
+The second additive migration adds description/application URL, cancellation
+reason, and private document metadata/reference fields. PDF bytes stay outside
+PostgreSQL and public assets. `MAWOS_PLACEMENT_DOCUMENT_ROOT` controls the local
+backend; Docker uses the private `placement_documents` named volume. Back up
+that volume and PostgreSQL together.
 
 Downgrade deliberately retains all columns, constraints and outcome rows, and
 rolls back only Alembic revision tracking. This preserves data for application
@@ -143,16 +146,24 @@ database name and current revision, stop application writers, then manually:
 ```bash
 # Load reviewed environment values through your normal process configuration.
 .venv/bin/alembic current
-.venv/bin/alembic upgrade 20260911_placement
+.venv/bin/alembic upgrade 20260912_placement_details
 # Container equivalent (use the matching external/docker DB Compose files):
-docker compose exec backend alembic upgrade 20260911_placement
+docker compose exec backend alembic upgrade 20260912_placement_details
 ```
 
 If the backend is stopped because the new table is absent, use a one-off
 container instead, after the same backup/target verification:
 
 ```bash
-docker compose run --rm --no-deps backend alembic upgrade 20260911_placement
+docker compose run --rm --no-deps backend alembic upgrade 20260912_placement_details
+```
+
+Then preview the audited, idempotent legacy repair; apply it only after checking
+the preview. It changes only `OPEN` drives with existing shortlist rows:
+
+```bash
+python scripts/reconcile_placement_statuses.py --database-url "$MAWOS_DATABASE_URL"
+python scripts/reconcile_placement_statuses.py --database-url "$MAWOS_DATABASE_URL" --apply --confirm-database mawos
 ```
 
 None of these live migration commands were executed during implementation.
@@ -185,22 +196,24 @@ uniquely named test schema for inspection. The implementation verification used
 a temporary PostgreSQL container with tmpfs storage and stopped it afterwards;
 the existing Docker volumes and live database were untouched.
 
-Manual browser acceptance after deployment: log in as an admin, create/open a
-drive, confirm generation/regeneration, inspect results, record an offer and
-exercise the second-offer warning. As a student, verify the own-record page and
-one shortlist notice. Check refresh/navigation at desktop and mobile widths,
-and verify staff cannot render either placement workspace.
+Manual browser acceptance after deployment: as admin, create/edit description
+and URL, upload/view/replace/remove a PDF, generate/regenerate, open the
+shortlist route, edit an outcome, and separately verify close/cancel modals. As
+a student, open a card, verify eligibility/reasons/PDF, and check apply is a
+new-tab external link only when eligible, active and in time. Verify DRAFT and
+other-student data are absent and staff cannot render either workspace.
 
-Recorded verification: backend **482 passed, 17 skipped** (PostgreSQL checks
-are opt-in in the ordinary run); focused PostgreSQL **2 passed** in isolated
-`mawos_test`; frontend **116 passed**; production build, project-venv `pip check`
-and `git diff --check` passed. The existing large-bundle warning and Python
-dependency deprecation warnings remain. Missing/corrupt/incompatible artifacts
-and prediction failures were verified to use rules-only fallback.
+Recorded verification for the placement-details revision: backend **504 passed,
+18 skipped** (PostgreSQL checks are opt-in in the ordinary run); focused
+PostgreSQL **3 passed** in isolated `mawos_test`; frontend **111 passed**.
+Alembic upgrade → downgrade → upgrade completed on `mawos_test` only.
+Production build, project-venv `pip check`, and `git diff --check` passed. The
+existing large-bundle and dependency-deprecation warnings remain.
 
 ## Files changed for this feature
 
-- `.env.example`, `docker-compose.yml`: model threshold setting.
+- `.env.example`, `docker-compose.yml`, `.gitignore`, `.dockerignore`,
+  `backend/Dockerfile`: private persistent document storage.
 - `backend/app/models.py`: additive placement fields/outcome metadata.
 - `backend/app/main.py`: register placement routes.
 - `backend/app/agents/placement.py`: placement event adapter and compatibility reads.
@@ -210,12 +223,16 @@ and prediction failures were verified to use rules-only fallback.
 - `backend/app/placement/scoring.py`: trusted model validation/versioning/fallback.
 - `backend/app/placement/service.py`: rules and transactional workflows.
 - `backend/app/placement/api.py`: authenticated HTTP interface.
+- `backend/app/placement/storage.py`: validated private PDF storage abstraction.
 - `alembic/versions/20260911_placement.py`: data-preserving migration.
+- `alembic/versions/20260912_placement_details.py`: additive detail/document metadata.
+- `scripts/reconcile_placement_statuses.py`: audited legacy status repair.
 - `frontend/src/services/api.js`: placement API wrappers.
 - `frontend/src/App.jsx`, `frontend/src/routes/roleRoutes.js`,
   `frontend/src/layouts/AppLayout.jsx`: protected pages, return paths and navigation.
 - `frontend/src/pages/placement/Placements.jsx`: admin and student pages.
-- `tests/test_placement.py`, `tests/test_placement_postgresql.py`: backend contracts
+- `tests/test_placement.py`, `tests/test_placement_documents.py`,
+  `tests/test_placement_postgresql.py`: backend contracts
   and guarded PostgreSQL migration/concurrency tests.
 - `frontend/src/test/placements.test.jsx`: role-safe frontend flows.
 - `docs/PLACEMENTS.md`: compatibility, operational instructions and verification.

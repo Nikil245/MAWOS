@@ -229,9 +229,37 @@ ATTENDANCE_THRESHOLD = 75.0          # % required for hall ticket
 ABSENCE_STREAK_ALERT = 3             # consecutive absences that trigger an alert
 FEE_LATE_FINE_PER_DAY = 50.0         # Rs per day after grace period
 FEE_GRACE_DAYS = 7
-LIBRARY_LOAN_DAYS = 14
-LIBRARY_FINE_PER_DAY = 5.0           # Rs per day overdue
+# Monetary policy values remain Decimal throughout the library workflow.
+from decimal import Decimal, InvalidOperation
+
+
+def _library_money(name: str, default: str) -> Decimal:
+    try:
+        value = Decimal(os.getenv(name, default))
+        if not value.is_finite() or value < 0 or value > Decimal("1000000") or value != value.quantize(Decimal("0.01")):
+            raise ValueError()
+        return value
+    except (InvalidOperation, ValueError):
+        raise ConfigurationError(f"{name} must be nonnegative money with at most two decimal places") from None
+
+
+LIBRARY_LOAN_DAYS = _positive_int_setting("MAWOS_LIBRARY_LOAN_DAYS", 7)
+LIBRARY_PICKUP_DEADLINE_DAYS = _positive_int_setting("MAWOS_LIBRARY_PICKUP_DEADLINE_DAYS", 2)
+LIBRARY_FINE_PER_OVERDUE_DAY = _library_money("MAWOS_LIBRARY_FINE_PER_OVERDUE_DAY", "1")
+LIBRARY_MISSED_PICKUP_FINE = _library_money("MAWOS_LIBRARY_MISSED_PICKUP_FINE", "10")
+LIBRARY_FINE_BLOCK_THRESHOLD = _library_money("MAWOS_LIBRARY_FINE_BLOCK_THRESHOLD", "25")
+LIBRARY_RECOMMENDATION_LIMIT = min(_positive_int_setting("MAWOS_LIBRARY_RECOMMENDATION_LIMIT", 5), 50)
+LIBRARY_FINE_PER_DAY = LIBRARY_FINE_PER_OVERDUE_DAY
 
 # ML model artifacts
 ML_MODELS_DIR = BASE_DIR / "ml" / "models"
 ML_DATA_DIR = BASE_DIR / "ml" / "data"
+
+# Placement documents are private application data. They are served only by
+# authenticated API handlers and must never live under frontend/static roots.
+PLACEMENT_DOCUMENT_ROOT = Path(
+    os.getenv("MAWOS_PLACEMENT_DOCUMENT_ROOT", str(BASE_DIR / "runtime" / "placement-documents"))
+).expanduser().resolve()
+PLACEMENT_DOCUMENT_MAX_BYTES = _positive_int_setting(
+    "MAWOS_PLACEMENT_DOCUMENT_MAX_BYTES", 10 * 1024 * 1024
+)
