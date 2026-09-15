@@ -13,6 +13,8 @@ if _live_database_url:
     os.environ["MAWOS_LIVE_DATABASE_URL_FOR_TEST_GUARD"] = _live_database_url
 os.environ["MAWOS_ENV"] = "test"
 os.environ["MAWOS_JWT_SECRET"] = "mawos-test-secret-0123456789-abcdefghijklmnopqrstuvwxyz"
+os.environ["MAWOS_AI_PROVIDER"] = "auto"
+os.environ["GROQ_API_KEY"] = ""
 os.environ["MAWOS_SEED_DEMO_DATA"] = "false"
 os.environ["MAWOS_DATABASE_MODE"] = "external"
 os.environ["MAWOS_DATABASE_URL"] = f"sqlite:///{Path(_tmpdir) / 'test.db'}"
@@ -44,6 +46,14 @@ def db():
     session = SessionLocal()
     yield session
     session.close()
+
+
+@pytest.fixture(autouse=True)
+def reset_ai_provider_runtime():
+    from backend.app import llm
+    llm.reset_runtime_state_for_tests()
+    yield
+    llm.reset_runtime_state_for_tests()
 
 
 @pytest.fixture(scope="session", autouse=True)

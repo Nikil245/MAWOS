@@ -4,8 +4,10 @@ Everything is overridable via environment variables so the same codebase
 runs on SQLite (default, zero-install) or PostgreSQL, and with or without
 a local Ollama LLM.
 """
+import math
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from sqlalchemy.engine import make_url
 
@@ -18,6 +20,7 @@ class ConfigurationError(RuntimeError):
 
 ENVIRONMENTS = frozenset({"development", "test", "production"})
 DATABASE_MODES = frozenset({"external", "docker"})
+AI_PROVIDERS = frozenset({"auto", "groq", "ollama", "disabled"})
 MIN_JWT_SECRET_BYTES = 32
 
 # This fallback is deliberately limited to non-production modes. It is
@@ -79,8 +82,23 @@ def _positive_float_setting(name: str, default: float) -> float:
         value = float(raw)
     except ValueError as exc:
         raise ConfigurationError(f"{name} must be a positive number") from exc
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         raise ConfigurationError(f"{name} must be a positive number")
+    return value
+
+
+def _bounded_positive_float_setting(name: str, default: float,
+                                    maximum: float) -> float:
+    value = _positive_float_setting(name, default)
+    if value > maximum:
+        raise ConfigurationError(f"{name} must be at most {maximum:g}")
+    return value
+
+
+def _bounded_positive_int_setting(name: str, default: int, maximum: int) -> int:
+    value = _positive_int_setting(name, default)
+    if value > maximum:
+        raise ConfigurationError(f"{name} must be at most {maximum}")
     return value
 
 
@@ -202,6 +220,32 @@ DATABASE_URL = database_url()
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 12
 
+# Optional generative provider. Deterministic MAWOS routes never consult this
+# setting and remain available without a key, network, or model process.
+AI_PROVIDER = os.getenv("MAWOS_AI_PROVIDER", "auto").strip().lower()
+if AI_PROVIDER not in AI_PROVIDERS:
+    raise ConfigurationError("MAWOS_AI_PROVIDER must be auto, groq, ollama, or disabled")
+GROQ_BASE_URL = os.getenv(
+    "MAWOS_GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+GROQ_MODEL = os.getenv("MAWOS_GROQ_MODEL", "openai/gpt-oss-20b").strip()
+_groq_url = urlsplit(GROQ_BASE_URL)
+if (_groq_url.scheme != "https" or not _groq_url.hostname or _groq_url.username
+        or _groq_url.password or _groq_url.query or _groq_url.fragment):
+    raise ConfigurationError(
+        "MAWOS_GROQ_BASE_URL must be an HTTPS URL without credentials, query, or fragment")
+if not GROQ_MODEL:
+    raise ConfigurationError("MAWOS_GROQ_MODEL must not be empty")
+GROQ_TIMEOUT_S = _bounded_positive_float_setting(
+    "MAWOS_GROQ_TIMEOUT_SECONDS", 30.0, 60.0)
+GROQ_MAX_TOKENS = min(
+    _positive_int_setting("MAWOS_GROQ_MAX_TOKENS", 180), 180)
+GROQ_MAX_INPUT_CHARS = min(
+    _positive_int_setting("MAWOS_GROQ_MAX_INPUT_CHARS", 6000), 12000)
+GROQ_HEALTH_TTL_S = _positive_float_setting("MAWOS_GROQ_HEALTH_TTL", 30.0)
+GROQ_RETRY_COOLDOWN_S = _positive_float_setting("MAWOS_GROQ_RETRY_COOLDOWN", 5.0)
+AI_GENERATIVE_REQUESTS_PER_MINUTE = min(
+    _positive_int_setting("MAWOS_AI_REQUESTS_PER_MINUTE", 6), 60)
+
 # Local LLM (optional). The system is fully functional without it —
 # the deterministic keyword classifier handles intent routing.
 OLLAMA_HOST = os.getenv("MAWOS_OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
@@ -210,9 +254,24 @@ OLLAMA_HOST = os.getenv("MAWOS_OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/
 OLLAMA_MODEL = os.getenv("MAWOS_OLLAMA_MODEL", "qwen2.5:3b")
 # One complete assistant-turn budget, including availability checks and every
 # model round.  There is intentionally no hidden multiplier in the client.
-OLLAMA_TIMEOUT_S = _positive_float_setting("MAWOS_OLLAMA_TIMEOUT", 20.0)
+_OLLAMA_TIMEOUT_SETTING = (
+    "MAWOS_OLLAMA_TIMEOUT_SECONDS"
+    if os.getenv("MAWOS_OLLAMA_TIMEOUT_SECONDS", "").strip()
+    else "MAWOS_OLLAMA_TIMEOUT"
+)
+# Honor the original MAWOS_OLLAMA_TIMEOUT name when the clearer new name is
+# absent, so existing native deployments keep their configured deadline.
+OLLAMA_TIMEOUT_S = _bounded_positive_float_setting(
+    _OLLAMA_TIMEOUT_SETTING, 90.0, 600.0)
 OLLAMA_CONTEXT_TOKENS = _positive_int_setting("MAWOS_OLLAMA_CONTEXT", 2048)
-OLLAMA_MAX_OUTPUT_TOKENS = _positive_int_setting("MAWOS_OLLAMA_MAX_OUTPUT_TOKENS", 192)
+# Preserve compatibility with older local .env files while enforcing the
+# response cap even if they still request the former 192-token value.
+OLLAMA_MAX_OUTPUT_TOKENS = min(
+    _positive_int_setting("MAWOS_OLLAMA_MAX_OUTPUT_TOKENS", 160), 180)
+# Attach an explicit Ollama keep-alive to normal chat requests. This keeps the
+# model resident without polling or background traffic.
+OLLAMA_KEEP_ALIVE_S = _bounded_positive_int_setting(
+    "MAWOS_OLLAMA_KEEP_ALIVE_SECONDS", 300, 86400)
 OLLAMA_MAX_RESPONSE_CHARS = _positive_int_setting("MAWOS_OLLAMA_MAX_RESPONSE_CHARS", 12000)
 OLLAMA_MAX_ROUNDS = _positive_int_setting("MAWOS_OLLAMA_MAX_ROUNDS", 2)
 OLLAMA_CONCURRENCY = _positive_int_setting("MAWOS_OLLAMA_CONCURRENCY", 1)

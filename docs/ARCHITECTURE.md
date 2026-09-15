@@ -14,12 +14,13 @@ Orchestration"** consistently in the abstract, contributions and conclusion.
  FastAPI gateway (JWT; every route role-guarded)
     │
  ORCHESTRATOR AGENT
-   ├── LLM path (primary):  Ollama chat + native tool calling
-   │      conversation → model selects tools from ROLE-FILTERED schemas
-   │      → tools execute under hard permission checks → results returned
-   │      → model composes a grounded answer   (≤3 tool rounds)
-   └── Fallback path:       weighted-keyword classifier → one mapped tool
-                            → deterministic formatter
+   ├── Deterministic path:  recognized private/MAWOS intent → one
+   │      permission-checked read-only tool → server formatter
+   ├── General path:        bounded sanitized text → Groq, optional Ollama
+   │      fallback, or a safe provider-unavailable response
+   └── Legacy escalation:   bounded Ollama selection for an ambiguous
+                            supported record intent → one checked tool →
+                            deterministic formatter
     │  (same tools, same permissions in both paths)
     ▼
  TOOL REGISTRY (12 typed tools; roles enforced in code, not in the prompt)
@@ -68,14 +69,15 @@ budget, and the bus has Redis pub/sub semantics, so distributing later is a
 transport swap, not a redesign.
 
 ### "What is the LLM actually doing?"
-In LLM mode it is the *decision-maker on the query path*: it reads the
-request, chooses which of the 12 tools to call (and may chain several), sees
-their JSON results, and writes the answer itself. It is not a chatbot bolted
-onto templates — it never sees the database, only tool results, and it cannot
-escape its role's tool set because **permissions are enforced in code**
-(`agents/tools.py`), not requested in the prompt. A student asking for another
-student's record receives their own; a student calling an admin tool gets a
-refusal from the registry, not from the model's goodwill.
+For general-learning questions, a hosted Groq model or optional local Ollama
+model writes a bounded answer from sanitized conversation text, with no tools
+or database access. For recognized private and institutional queries, the
+model does nothing: FastAPI selects a permission-checked read-only tool and
+renders the answer deterministically. A bounded local-only escalation may help
+classify ambiguous supported record phrasing, but it receives no private result
+and cannot authorize access. **Permissions are enforced in code**
+(`agents/tools.py`), never in a model prompt. A student asking for another
+student's record is denied by the registry regardless of model output.
 
 The deterministic tier exists so the institution keeps working offline — and
 because it is a genuine research baseline: publishing both numbers quantifies

@@ -45,7 +45,7 @@ docker compose config --quiet
 docker compose build
 docker compose up -d
 docker compose ps
-docker compose logs -f backend frontend ollama
+docker compose logs -f backend frontend
 ```
 
 No migration is run by these commands. The backend startup diagnostic reports
@@ -80,8 +80,8 @@ Service URLs: frontend `http://localhost:3000`; backend health
 `http://localhost:8000/`; API documentation `http://localhost:8000/docs`.
 PostgreSQL is intentionally private to the Compose network.
 In Docker-database mode it uses a separate internal network shared only with
-the backend. Ollama remains on the application network and has no network path
-or credentials for PostgreSQL.
+the backend. When enabled, Ollama remains on the application network and has
+no network path or credentials for PostgreSQL.
 
 The Docker database uses a persistent named volume, starts empty, and is not a
 copy of the existing host database. Backend waits for PostgreSQL health, then
@@ -122,21 +122,54 @@ use the reviewed project procedure (which may require `alembic stamp head`)
 rather than blindly upgrading. Never run migration commands automatically or
 against production without a backup and change approval.
 
-## Ollama
+## Hosted and local AI providers
 
-Ollama is a default service. `docker compose up -d` starts frontend, backend,
-and Ollama without a profile; backend waits for Ollama's health check before it
-starts. The named `ollama_data` volume persists downloaded models, and Ollama
-remains private to the Compose network. Pull the configured model explicitly
-after the first startup:
+Groq is optional and configured only in the backend runtime environment. Its
+key must never use a `VITE_` prefix. `auto` verifies Groq with an authenticated
+`/models` request, then uses Ollama only if Groq is unavailable. With neither
+available, the API remains deterministic-only. The default Groq model is listed
+as production at <https://console.groq.com/docs/models>; the compatible API is
+documented at <https://console.groq.com/docs/openai>.
+
+`MAWOS_AI_PROVIDER` accepts `auto`, `groq`, `ollama`, and `disabled`. Provider
+checks occur on the first eligible generative request, never during backend
+startup. Requests and responses are bounded, transient hosted failures receive
+only one immediate retry, and generative requests are limited per authenticated
+user. Deterministic record and exact catalogue routes do not enter that rate
+limit.
+
+Ollama is an optional `local-ai` profile, not a backend startup dependency. Its
+named volume persists models and it remains private to the Compose network:
 
 ```bash
-docker compose up -d
-docker compose exec ollama ollama pull qwen2.5:3b
+docker compose --profile local-ai up -d
+docker compose --profile local-ai exec ollama ollama pull qwen2.5:3b
 ```
 
 Normal startup does not download a model. Until the configured model is
 available, MAWOS retains its deterministic safe fallback.
+
+Assistant requests use `qwen2.5:3b` by default. The backend allows 90 seconds
+for the complete Ollama turn (`MAWOS_OLLAMA_TIMEOUT_SECONDS`, valid range
+greater than zero through 600), caps model output at 160 tokens by default
+(`MAWOS_OLLAMA_MAX_OUTPUT_TOKENS`, maximum 180), and asks Ollama to keep the
+model resident for 300 idle seconds (`MAWOS_OLLAMA_KEEP_ALIVE_SECONDS`, maximum
+86400). The keep-alive is attached to normal chat requests; MAWOS does not run
+a background warming loop. Academic and library data remains permission-checked
+and read by FastAPI only. Neither provider receives database access, private
+academic answers, database credentials, JWTs, borrower data, or internal IDs.
+Library generation sees bounded title/author/category rows only; FastAPI filters
+availability and refreshes all stock facts.
+
+Existing native deployments that still set `MAWOS_OLLAMA_TIMEOUT` remain
+compatible; `MAWOS_OLLAMA_TIMEOUT_SECONDS` takes precedence when both exist.
+
+The previous local-only setup was sensitive to cold model loading and memory
+pressure on the documented 4 GB GPU, had one generation slot, and made Compose
+wait for Ollama health before starting the backend. An unloaded, restarting, or
+timed-out daemon therefore appeared as application instability. Ollama is now
+on-demand and optional, while deterministic startup and record queries remain
+independent.
 
 ## Development and lifecycle
 

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import AssistantPage from '../pages/shared/AssistantPage';
 import { api } from '../services/api';
+import { userSessionKey } from '../hooks/useUserSessionState';
 
 vi.mock('../services/api', () => ({
   api: { chat: vi.fn(), assistantCapabilities: vi.fn(), me: vi.fn() },
@@ -27,7 +28,7 @@ const capability = {
 async function renderAssistant() {
   localStorage.setItem('mawos_token', 'token');
   localStorage.setItem('mawos_user', JSON.stringify({
-    role: 'student', name: 'Good Student', ai_mode: 'lexicon',
+    username: 'student.one', role: 'student', name: 'Good Student', ai_mode: 'lexicon',
   }));
   const view = render(<BrowserRouter><AuthProvider><AssistantPage /></AuthProvider></BrowserRouter>);
   await screen.findByText(capability.greeting);
@@ -36,7 +37,7 @@ async function renderAssistant() {
 
 describe('academic assistant response contract', () => {
   beforeEach(() => {
-    localStorage.clear(); vi.clearAllMocks();
+    localStorage.clear(); sessionStorage.clear(); vi.clearAllMocks();
     api.assistantCapabilities.mockResolvedValue(capability);
   });
 
@@ -51,7 +52,7 @@ describe('academic assistant response contract', () => {
     fireEvent.click(screen.getByRole('button', { name: /send message/i }));
 
     expect(await screen.findByText('Overall attendance: 82%')).toBeInTheDocument();
-    expect(screen.getByText('Deterministic answer')).toBeInTheDocument();
+    expect(screen.getByText('Deterministic MAWOS result')).toBeInTheDocument();
     expect(screen.queryByText(/"text":/)).not.toBeInTheDocument();
   });
 
@@ -81,7 +82,7 @@ describe('academic assistant response contract', () => {
     fireEvent.click(screen.getByRole('button', { name: /send message/i }));
 
     expect(await screen.findByText('Your fees are cleared.')).toBeInTheDocument();
-    expect(screen.getByText('Deterministic fallback after Ollama')).toBeInTheDocument();
+    expect(screen.getByText('Safe fallback')).toBeInTheDocument();
   });
 
   it('uses fallback metadata while keeping a normal null-code lexicon answer deterministic', async () => {
@@ -103,12 +104,12 @@ describe('academic assistant response contract', () => {
     fireEvent.change(input, { target: { value: 'Do I owe fees?' } });
     fireEvent.click(screen.getByRole('button', { name: /send message/i }));
     expect(await screen.findByText('All fees are cleared.')).toBeInTheDocument();
-    expect(screen.getByText('Deterministic answer')).toBeInTheDocument();
+    expect(screen.getByText('Deterministic MAWOS result')).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: 'Show my marks' } });
     fireEvent.click(screen.getByRole('button', { name: /send message/i }));
     expect(await screen.findByText('Marks unavailable.')).toBeInTheDocument();
-    expect(screen.getByText('Deterministic fallback')).toBeInTheDocument();
+    expect(screen.getByText('Safe fallback')).toBeInTheDocument();
   });
 
   it('shows loading and a safe error without exposing backend details', async () => {
@@ -124,5 +125,9 @@ describe('academic assistant response contract', () => {
     reject(new Error('internal database password'));
     await waitFor(() => expect(screen.getByText(/records were not changed/i)).toBeInTheDocument());
     expect(screen.queryByText(/database password/i)).not.toBeInTheDocument();
+    const stored = sessionStorage.getItem(userSessionKey(
+      { username: 'student.one', role: 'student' }, 'assistant')) || '';
+    expect(stored).not.toContain('Show my marks');
+    expect(stored).not.toContain('database password');
   });
 });

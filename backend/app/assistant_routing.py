@@ -91,7 +91,13 @@ def has_record_request(query, identifiers):
     """Domain keywords alone inside unrelated prose are not a data request."""
     if identifiers:
         return True
+    # These are short UI commands.  Keep them ahead of the general-learning
+    # provider boundary even when they omit a possessive such as "my".
     if llm.detect_personal_chat_intents(query):
+        return True
+    # These service-backed domains must never fall through to a generative
+    # provider merely because the user omitted "my" from a short command.
+    if re.fullmatch(r"(?:my )?(?:time[ -]?table|class schedule|placements?)", query):
         return True
     non_data_framing = re.search(
         r"\b(?:poem|poetry|joke|story|presentation|meaning|definition|in general)\b"

@@ -13,7 +13,7 @@ routes (`AdmissionAgent.funnel`, `backend/app/api/routes.py`).
 """
 import re
 
-from ..models import Department, Faculty, FeeRecord, Student, TeachingAssignment, User
+from ..models import Department, Faculty, FeeRecord, Student, Subject, TeachingAssignment, User
 
 STAFF = ("faculty", "hod", "principal", "admin")
 ALL_ROLES = ("student",) + STAFF
@@ -511,8 +511,16 @@ def _chat_attendance(db, agents, user, args):
     from ..models import AttendanceSummary
     from .attendance import overall_percentage
     subs = db.query(AttendanceSummary).filter_by(usn=student.usn).all()
+    # Subject labels are public catalogue metadata, but the attendance rows
+    # themselves remain bound to the authenticated student's USN above.
+    names = {
+        code: name for code, name in db.query(Subject.code, Subject.name).filter(
+            Subject.code.in_([row.subject_code for row in subs])).all()
+    }
     return {"usn": student.usn, "overall_pct": overall_percentage(db, student.usn),
-            "subjects": [{"subject": s.subject_code, "attended": s.classes_attended,
+            "subjects": [{"subject": (f"{names[s.subject_code]} ({s.subject_code})"
+                                      if s.subject_code in names else s.subject_code),
+                          "attended": s.classes_attended,
                           "held": s.classes_held, "pct": s.percentage,
                           "shortage": s.shortage} for s in subs]}
 

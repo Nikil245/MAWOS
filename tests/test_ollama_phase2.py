@@ -1,8 +1,10 @@
 """Phase 2 Ollama client and grounded-chat safety, using no live service."""
 import asyncio
 import json
+import os
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from sqlalchemy.orm import Session
 
@@ -26,6 +28,32 @@ def _reset_ollama_state():
     llm.reset_runtime_state_for_tests()
     yield
     llm.reset_runtime_state_for_tests()
+
+
+def test_timeout_defaults_to_90_seconds_and_accepts_configuration(monkeypatch):
+    monkeypatch.delenv("MAWOS_OLLAMA_TIMEOUT_SECONDS", raising=False)
+    assert config._bounded_positive_float_setting(
+        "MAWOS_OLLAMA_TIMEOUT_SECONDS", 90.0, 600.0) == 90.0
+    monkeypatch.setenv("MAWOS_OLLAMA_TIMEOUT_SECONDS", "135.5")
+    assert config._bounded_positive_float_setting(
+        "MAWOS_OLLAMA_TIMEOUT_SECONDS", 90.0, 600.0) == 135.5
+
+
+def test_legacy_timeout_name_remains_supported(monkeypatch):
+    monkeypatch.delenv("MAWOS_OLLAMA_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setenv("MAWOS_OLLAMA_TIMEOUT", "45")
+    setting = ("MAWOS_OLLAMA_TIMEOUT_SECONDS"
+               if os.getenv("MAWOS_OLLAMA_TIMEOUT_SECONDS", "").strip()
+               else "MAWOS_OLLAMA_TIMEOUT")
+    assert config._bounded_positive_float_setting(setting, 90.0, 600.0) == 45.0
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "601", "nan", "inf", "not-a-number"])
+def test_timeout_rejects_unsafe_values(monkeypatch, value):
+    monkeypatch.setenv("MAWOS_OLLAMA_TIMEOUT_SECONDS", value)
+    with pytest.raises(config.ConfigurationError):
+        config._bounded_positive_float_setting(
+            "MAWOS_OLLAMA_TIMEOUT_SECONDS", 90.0, 600.0)
 
 
 def test_health_rejects_missing_model_and_recovers_after_forced_retry(monkeypatch):
@@ -212,6 +240,66 @@ def test_chat_timeout_and_concurrency_are_bounded(monkeypatch):
     assert all(result.error_code is None for result in results)
 
 
+def test_slower_response_succeeds_within_configured_budget_and_uses_concise_options(
+        monkeypatch):
+    async def available(*args, **kwargs):
+        return True
+
+    async def delayed_request(method, path, budget, payload=None):
+        assert method == "POST" and path == "/api/chat"
+        assert budget.timeout_s == 0.2
+        assert payload["model"] == "qwen2.5:3b"
+        assert payload["options"]["num_predict"] == 160
+        assert payload["options"]["num_predict"] <= 180
+        assert payload["keep_alive"] == "300s"
+        await asyncio.sleep(0.03)
+        return 200, _response({"role": "assistant", "content": "A concise answer."}), None
+
+    monkeypatch.setattr(llm, "check_ollama_async", available)
+    monkeypatch.setattr(llm, "_request_json", delayed_request)
+    result = asyncio.run(llm.chat_async(
+        [{"role": "user", "content": "Explain x"}], budget=llm.RequestBudget(0.2)))
+    assert result.error_code is None
+    assert result.message["content"] == "A concise answer."
+    assert result.latency_ms >= 20
+
+
+@pytest.mark.parametrize(("error_code", "category"), [
+    ("timeout", "timeout"),
+    ("connection_failure", "connection_failure"),
+    ("model_missing", "missing_model"),
+    ("invalid_json", "invalid_response"),
+    ("invalid_message", "invalid_response"),
+    ("http_error", "ollama_http_error"),
+])
+def test_safe_error_classification(error_code, category):
+    assert llm.safe_error_category(error_code) == category
+
+
+def test_connection_failure_log_contains_only_safe_category_and_elapsed_time(
+        caplog, monkeypatch):
+    secret = "student-private-value"
+
+    class FailingClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def request(self, *_args, **_kwargs):
+            raise httpx.ConnectError(secret)
+
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **_kwargs: FailingClient())
+    with caplog.at_level("WARNING"):
+        result = asyncio.run(llm.chat_async(
+            [{"role": "user", "content": secret}], budget=llm.RequestBudget(0.2)))
+    assert result.error_code == "connection_failure"
+    assert "category=connection_failure" in caplog.text
+    assert "elapsed_ms=" in caplog.text
+    assert secret not in caplog.text
+
+
 def _force_llm(monkeypatch):
     async def decide(query, budget):
         result = llm.classify_keyword(query)
@@ -348,8 +436,8 @@ def test_tool_free_or_incorrect_non_numeric_model_answer_falls_back(agents, db, 
     monkeypatch.setattr(llm, "chat_async", tool_free)
     no_tool = asyncio.run(agents["orchestrator_agent"].handle_chat(db, user, "attendance"))
     assert no_tool["mode"] == "lexicon"
-    assert no_tool["fallback"] is True
-    assert no_tool["fallback_code"] == "tool_evidence_missing"
+    assert no_tool["fallback"] is False
+    assert no_tool["fallback_code"] is None
 
     calls = 0
 
@@ -370,8 +458,8 @@ def test_tool_free_or_incorrect_non_numeric_model_answer_falls_back(agents, db, 
     monkeypatch.setattr(llm, "chat_async", incorrect_final)
     wrong_claim = asyncio.run(agents["orchestrator_agent"].handle_chat(db, user, "attendance"))
     assert wrong_claim["mode"] == "lexicon"
-    assert wrong_claim["fallback"] is True
-    assert wrong_claim["fallback_code"] == "grounding_validation_failed"
+    assert wrong_claim["fallback"] is False
+    assert wrong_claim["fallback_code"] is None
 
 
 def test_verified_model_answer_is_read_only(agents, db, monkeypatch):
@@ -416,15 +504,15 @@ def test_verified_model_answer_is_read_only(agents, db, monkeypatch):
     before_logs = db.query(IntentLog).count()
     response = asyncio.run(agents["orchestrator_agent"].handle_chat(db, user, "fees"))
 
-    assert response["mode"] == "llm"
+    assert response["mode"] == "lexicon"
     assert response["fallback"] is False
-    assert response["model"] == config.OLLAMA_MODEL
-    assert response["routing"]["attempted_llm"] is True
-    assert response["routing"]["accepted_llm"] is True
+    assert response.get("model") is None
+    assert response["routing"]["attempted_llm"] is False
+    assert response["routing"]["accepted_llm"] is False
     assert response["routing"]["deterministic_fallback"] is False
     assert executions == 1
     assert len(response["tools_used"]) == 1
-    assert exposed_tools[0] and exposed_tools[1] is None
+    assert exposed_tools == []
     assert commits == [] and flushes == []
     assert db.query(IntentLog).count() == before_logs
 
@@ -539,10 +627,10 @@ def test_forged_or_denied_model_tool_never_reaches_non_chat_service(agents, db, 
     monkeypatch.setattr(llm, "chat_async", forged)
     response = asyncio.run(agents["orchestrator_agent"].handle_chat(db, user, "attendance"))
     assert response["mode"] == "lexicon"
-    assert response["fallback_code"] == "tool_denied"
-    assert response["routing"]["attempted_llm"] is True
+    assert response["fallback_code"] is None
+    assert response["routing"]["attempted_llm"] is False
     assert response["routing"]["accepted_llm"] is False
-    assert response["routing"]["deterministic_fallback"] is True
+    assert response["routing"]["deterministic_fallback"] is False
 
 
 @pytest.mark.parametrize("second_calls", [
@@ -593,10 +681,10 @@ def test_final_stage_rejects_every_additional_tool_without_reexecution(
     assert executions == 1
     assert len(response["tools_used"]) == 1
     assert response["mode"] == "lexicon"
-    assert response["fallback_code"] == "final_tool_call_not_allowed"
-    assert response["routing"]["attempted_llm"] is True
+    assert response["fallback_code"] is None
+    assert response["routing"]["attempted_llm"] is False
     assert response["routing"]["accepted_llm"] is False
-    assert response["routing"]["deterministic_fallback"] is True
+    assert response["routing"]["deterministic_fallback"] is False
 
 
 @pytest.mark.parametrize(("final_result", "expected_code"), [
@@ -637,14 +725,14 @@ def test_final_stage_failures_reuse_one_authorized_result_as_safe_fallback(
     monkeypatch.setattr(llm, "chat_async", two_stage)
     response = asyncio.run(agents["orchestrator_agent"].handle_chat(
         db, user, "fees"))
-    assert model_round == 2 and executions == 1
+    assert model_round == 0 and executions == 1
     assert response["mode"] == "lexicon"
-    assert response["fallback"] is True
-    assert response["fallback_code"] == expected_code
+    assert response["fallback"] is False
+    assert response["fallback_code"] is None
     assert response["intent"] == "fees_query"
-    assert response["routing"]["attempted_llm"] is True
+    assert response["routing"]["attempted_llm"] is False
     assert response["routing"]["accepted_llm"] is False
-    assert response["routing"]["deterministic_fallback"] is True
+    assert response["routing"]["deterministic_fallback"] is False
 
 
 @pytest.mark.parametrize("selection_error", ["timeout", "truncated_response"])
@@ -670,6 +758,6 @@ def test_selection_stage_failure_falls_back_without_model_selected_execution(
     # One deterministic fallback read; no model-selected tool was executed.
     assert executions == 1
     assert response["mode"] == "lexicon"
-    assert response["fallback_code"] == selection_error
-    assert response["routing"]["attempted_llm"] is True
+    assert response["fallback_code"] is None
+    assert response["routing"]["attempted_llm"] is False
     assert response["routing"]["accepted_llm"] is False

@@ -40,6 +40,29 @@ RECOMMENDATION = re.compile(
     re.I,
 )
 AVAILABILITY = re.compile(r"\b(?:available|availability|in stock|copies|copy)\b", re.I)
+CONTEXTUAL_LIBRARY_FOLLOW_UP = re.compile(
+    r"^\s*(?:(?:is|are) (?:it|that|this)(?: book)? (?:available|in stock)"
+    r"(?: in (?:the )?(?:mawos )?(?:library|catalog(?:ue)?))?|"
+    r"who (?:wrote|is the author of) (?:it|that|this)(?: book)?|"
+    r"how many copies(?: of (?:it|that|this)(?: book)?)?(?: are available)?|"
+    r"can i (?:reserve|borrow|hold|renew|issue|return) (?:it|that|this)(?: book)?)\s*[?.!]*\s*$",
+    re.I,
+)
+CONTEXTUAL_MUTATION = re.compile(r"\b(?:reserve|borrow|hold|renew|issue|return)\b", re.I)
+CONTEXTUAL_COMPARE = re.compile(
+    r"\b(?:which (?:book |one )?(?:is )?best|which one should i choose|"
+    r"compare (?:these|those|the|all|them)|best among (?:these|those|the|all|them|\w+))\b",
+    re.I,
+)
+CONTEXTUAL_ORDINAL = re.compile(
+    r"\b(?:the )?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th)"
+    r"(?: book| one)\b",
+    re.I,
+)
+CONTEXTUAL_ALL_AVAILABILITY = re.compile(
+    r"^\s*(?:check|show)(?: their| the| all)? availability(?: of (?:these|those) books)?\s*[?.!]*\s*$",
+    re.I,
+)
 
 
 @dataclass(frozen=True)
@@ -92,7 +115,16 @@ def _extract_term(message: str) -> str:
     return ""
 
 
-def detect_library_request(message: str) -> LibraryRequest | None:
+def detect_library_request(message: str, *, has_context: bool = False) -> LibraryRequest | None:
+    if CONTEXTUAL_COMPARE.search(message):
+        return LibraryRequest("context_compare", message[:128])
+    if CONTEXTUAL_ORDINAL.search(message):
+        return LibraryRequest("context_selected", message[:128])
+    if CONTEXTUAL_ALL_AVAILABILITY.fullmatch(message):
+        return LibraryRequest("context_all_availability", message[:128])
+    if has_context and CONTEXTUAL_LIBRARY_FOLLOW_UP.fullmatch(message):
+        return LibraryRequest(
+            "context_mutation" if CONTEXTUAL_MUTATION.search(message) else "context_follow_up", "")
     if not LIBRARY_WORDING.search(message):
         return None
     if PRIVATE_LIBRARY.search(message):
@@ -128,13 +160,17 @@ def _action(term: str) -> list[dict]:
 def _base(text: str, *, term="", books=None, source="Library catalogue result",
           mode="lexicon", llm_attempted=False, accepted=False, fallback=False,
           fallback_code=None, reason="library catalogue lookup") -> dict:
+    safe_books = books or []
     return {
         "text": text, "category": "library_catalogue", "source_label": source,
         "mode": mode, "tools_used": [], "knowledge_sources": [], "context_topic": None,
         "latency_ms": 0.0, "fallback": fallback, "fallback_code": fallback_code,
         "routing": _routing(llm_attempted=llm_attempted, accepted=accepted, reason=reason,
                             fallback_from="llm" if fallback else None),
-        "data": {"books": books or []}, "actions": _action(term),
+        "data": {"books": safe_books}, "actions": _action(term),
+        "context_books": [{"title": book["title"], "isbn": book["isbn"],
+                           "author": book["author"], "category": book["category"]}
+                          for book in safe_books[:5]],
     }
 
 
@@ -197,7 +233,7 @@ def _list_text(intro: str, books: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def _guided_recommendation(term: str, books: list[dict]) -> dict:
+async def _guided_recommendation(term: str, books: list[dict], user_key: str) -> dict:
     available = [book for book in books if book["available_copies"] > 0][:8]
     if not available:
         return _base(
@@ -206,7 +242,7 @@ async def _guided_recommendation(term: str, books: list[dict]) -> dict:
         )
     catalogue_context = [
         {"index": index, "title": book["title"], "author": book["author"],
-         "category": book["category"], "available_copies": book["available_copies"]}
+         "category": book["category"]}
         for index, book in enumerate(available)
     ]
     prompt = (
@@ -216,11 +252,11 @@ async def _guided_recommendation(term: str, books: list[dict]) -> dict:
         '{"choices":[0]}.'
     )
     started = time.perf_counter()
-    reply = await llm.chat_async([
+    reply = await llm.general_chat_async([
         {"role": "system", "content": prompt},
         {"role": "user", "content": json.dumps({"catalogue_data": catalogue_context},
                                                   ensure_ascii=False, separators=(",", ":"))},
-    ], tools=None, budget=llm.RequestBudget())
+    ], user_key=user_key, budget=llm.RequestBudget())
     selected = None
     if reply.message and not reply.message.get("tool_calls"):
         try:
@@ -233,10 +269,13 @@ async def _guided_recommendation(term: str, books: list[dict]) -> dict:
     if selected:
         result = _base(
             _list_text("Library-guided recommendations from currently available catalogue books:", selected),
-            term=term, books=selected, source="Library-guided AI response", mode="llm",
+            term=term, books=selected,
+            source=("Generated by Groq AI" if reply.provider == "groq"
+                    else "Generated by local AI"), mode="llm",
             llm_attempted=True, accepted=True, reason="validated library recommendation choices",
         )
-        result["model"] = config.OLLAMA_MODEL
+        result["model"] = reply.model
+        result["provider"] = reply.provider
     else:
         result = _base(
             _list_text("Available matching catalogue books:", available[:3]),
@@ -248,7 +287,8 @@ async def _guided_recommendation(term: str, books: list[dict]) -> dict:
     return result
 
 
-async def answer_library_request(db, library_agent, request: LibraryRequest) -> dict:
+async def answer_library_request(db, library_agent, request: LibraryRequest,
+                                 user_key: str = "student:unknown") -> dict:
     if request.kind in {"private", "mutation"}:
         return denied_response(request.kind)
     if not request.term:
@@ -268,7 +308,7 @@ async def answer_library_request(db, library_agent, request: LibraryRequest) -> 
         book["title"].casefold().strip(), book["isbn"].casefold().strip()
     }), None)
     if request.kind == "recommendation":
-        return await _guided_recommendation(request.term, books)
+        return await _guided_recommendation(request.term, books, user_key)
     if exact or len(books) == 1:
         selected = exact or books[0]
         return _base(_exact_text(selected), term=request.term, books=[selected],
@@ -281,3 +321,212 @@ async def answer_library_request(db, library_agent, request: LibraryRequest) -> 
         )
     return _base(_list_text("Matching active catalogue books:", books[:5]),
                  term=request.term, books=books[:5], reason="catalogue search results")
+
+
+def _context_book_references(context: list[dict] | None) -> tuple[list[dict], bool]:
+    """Take only the most recent bounded public catalogue reference set."""
+    for item in reversed(context or []):
+        if (item.get("role") == "assistant" and item.get("category") == "library_catalogue"
+                and isinstance(item.get("books"), list) and item["books"]):
+            return item["books"][:5], bool(item.get("candidate_set_expired"))
+    return [], False
+
+
+def _last_general_pair(context: list[dict] | None) -> tuple[str, str] | None:
+    for index in range(len(context or []) - 2, -1, -2):
+        first, second = context[index:index + 2]
+        if (first.get("role") == "user" and second.get("role") == "assistant"
+                and first.get("category") == second.get("category") == "general_ai"):
+            return first.get("content", ""), second.get("content", "")
+    return None
+
+
+def _last_library_question(context: list[dict] | None) -> str:
+    for index in range(len(context or []) - 2, -1, -2):
+        first, second = context[index:index + 2]
+        if (first.get("role") == "user" and second.get("role") == "assistant"
+                and first.get("category") == second.get("category") == "library_catalogue"
+                and second.get("books")):
+            return first.get("content", "")
+    return ""
+
+
+def _general_subject(question: str) -> str:
+    words = [word for word in re.findall(r"[A-Za-z0-9+#.]+", question)
+             if word.casefold() not in {
+                 "a", "an", "and", "book", "books", "for", "give", "i", "is", "learn",
+                 "learning", "me", "my", "of", "please", "recommend", "roadmap", "should",
+                 "the", "to", "what", "with",
+             }]
+    return " ".join(words[:5])[:128]
+
+
+def _live_context_books(db, library_agent, references: list[dict]) -> list[dict]:
+    live = []
+    seen = set()
+    for reference in references[:5]:
+        isbn = str(reference.get("isbn", "")).strip()
+        if not isbn or isbn in seen:
+            continue
+        matches = library_agent.search_catalogue(db, isbn, limit=4)
+        exact = next((book for book in matches if book["isbn"].casefold() == isbn.casefold()), None)
+        if exact:
+            live.append(exact)
+            seen.add(isbn)
+    return live
+
+
+async def answer_library_follow_up(db, library_agent, request: LibraryRequest,
+                                   context: list[dict] | None) -> dict:
+    """Resolve pronouns from safe references, then refresh all facts live."""
+    references, expired = _context_book_references(context)
+    books = _live_context_books(db, library_agent, references)
+    if expired:
+        if books:
+            return _base(
+                _list_text("The earlier candidate set has expired. These are the matching "
+                           "current active-catalogue results:", books),
+                books=books, reason="expired library candidate set refreshed")
+        return _base(
+            "The earlier library candidate set has expired and no matching active catalogue "
+            "results remain. Please run the search again.",
+            reason="expired library candidate set has no active matches")
+    if request.kind == "context_compare":
+        if not books:
+            return _base(
+                "I do not have a current library candidate set for this conversation. "
+                "Please search or request recommendations again to see current catalogue results.",
+                reason="comparison has no current candidate set")
+        wording = f"{_last_library_question(context)} {request.term}".strip()
+        return _base(_comparison_text(books, wording), books=books,
+                     reason="deterministic grounded candidate comparison")
+    if request.kind == "context_all_availability":
+        if not books:
+            return _base(
+                "I do not have a current library candidate set for this conversation. "
+                "Please search again before checking availability.",
+                reason="availability has no current candidate set")
+        return _base(_list_text("Current availability for the candidate books:", books),
+                     books=books, reason="live availability for candidate set")
+    if request.kind == "context_selected":
+        if not books:
+            return _base(
+                "I do not have a current library candidate set for this conversation. "
+                "Please search again before referring to a numbered book.",
+                reason="ordinal follow-up has no current candidate set")
+        index = _ordinal_index(request.term)
+        if index is None or index >= len(books):
+            return _base(
+                f"That candidate number is not present. Choose a number from 1 to {len(books)}.",
+                books=books, reason="ordinal is outside candidate set")
+        selected = books[index]
+        if re.search(r"\b(?:author|who (?:wrote|is))\b", request.term, re.I):
+            text = f"The author of {selected['title']} is {selected['author']}."
+        elif re.search(r"\b(?:available|availability|copies|copy|stock)\b", request.term, re.I):
+            text = f"{selected['title']}: {_stock_line(selected)}"
+        else:
+            text = _exact_text(selected)
+        return _base(text, term=selected["title"], books=[selected],
+                     reason="live ordinal candidate lookup")
+    if len(references) > 1:
+        if books:
+            return _base(
+                _list_text("I have multiple books in context. Choose the title you mean:", books),
+                books=books, reason="ambiguous bounded library context")
+        return _base(
+            "The earlier book choices are not currently confirmed in the active catalogue. "
+            "Please provide a title or ISBN.", reason="stale ambiguous library context")
+    if len(references) == 1:
+        reference = references[0]
+        if not books:
+            return _base(
+                f"{reference['title']} is not currently confirmed in the active MAWOS library catalogue. "
+                "Please search again by title or ISBN.", term=reference["title"],
+                reason="canonical library reference is no longer active")
+        book = books[0]
+        if request.kind == "context_mutation":
+            return _base(
+                f"{book['title']} is {_stock_line(book)}. Library chat is read-only; open the "
+                "Library page if you want to request an available copy.", term=book["title"],
+                books=[book], reason="contextual library mutation redirected read-only")
+        return _base(_exact_text(book), term=book["title"], books=[book],
+                     reason="live canonical library follow-up")
+
+    general = _last_general_pair(context)
+    if general:
+        prior_question, prior_answer = general
+        term = _general_subject(prior_question)
+        alternatives = library_agent.search_catalogue(db, term, limit=8) if term else []
+        mentioned = [book for book in alternatives
+                     if book["title"].casefold() in prior_answer.casefold()]
+        if len(mentioned) == 1:
+            book = mentioned[0]
+            if request.kind == "context_mutation":
+                return _base(
+                    f"{book['title']} is {_stock_line(book)}. Library chat is read-only; open the "
+                    "Library page if you want to request an available copy.", term=book["title"],
+                    books=[book], reason="general reference matched live catalogue read-only")
+            return _base(_exact_text(book), term=book["title"], books=[book],
+                         reason="general reference matched live catalogue")
+        if len(mentioned) > 1:
+            return _base(
+                _list_text("More than one previously mentioned book is in the active catalogue. "
+                           "Choose the title you mean:", mentioned[:5]),
+                term=term, books=mentioned[:5], reason="ambiguous general book context")
+        intro = ("I suggested this as a general reference, but it is not currently confirmed in "
+                 "the MAWOS library catalogue.")
+        if alternatives:
+            return _base(_list_text(intro + " Matching catalogue alternatives:", alternatives[:5]),
+                         term=term, books=alternatives[:5],
+                         reason="general suggestion not confirmed in live catalogue")
+        return _base(intro + " No matching active catalogue alternative was found.", term=term,
+                     reason="general suggestion not confirmed and no catalogue alternative")
+    return _base("Please name the book or provide its ISBN so I can check the active catalogue.",
+                 reason="library follow-up has no safe book context")
+
+
+def _ordinal_index(message: str) -> int | None:
+    match = CONTEXTUAL_ORDINAL.search(message)
+    if not match:
+        return None
+    return {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2,
+            "fourth": 3, "4th": 3, "fifth": 4, "5th": 4}.get(match.group(1).casefold())
+
+
+def _comparison_text(books: list[dict], wording: str) -> str:
+    """Compare only live candidates and choose by explicit, deterministic cues."""
+    def javascript(book):
+        return bool(re.search(r"javascript|ecmascript", f"{book['title']} {book['category']}", re.I))
+
+    java_books = [book for book in books if not javascript(book)
+                  and re.search(r"\bjava\b", f"{book['title']} {book['category']}", re.I)]
+    javascript_books = [book for book in books if javascript(book)]
+    beginner = bool(re.search(r"\b(?:beginner|starting|start|first time|new to)\b", wording, re.I))
+    advanced = bool(re.search(r"\b(?:advanced|effective|experienced|best practices?)\b", wording, re.I))
+    asks_javascript = bool(re.search(r"\bjavascript\b", wording, re.I))
+    if asks_javascript and javascript_books:
+        best = javascript_books[0]
+        reason = "it directly covers JavaScript"
+    elif beginner and java_books:
+        best = next((book for book in java_books if re.search(
+            r"head first|beginner|intro|fundamentals", f"{book['title']} {book['category']}", re.I)),
+            java_books[0])
+        reason = "it is the most approachable starting point for a Java beginner"
+    elif advanced and java_books:
+        best = next((book for book in java_books if "effective java" in book["title"].casefold()),
+                    java_books[0])
+        reason = "it is the strongest fit for advanced Java practices"
+    else:
+        best = next((book for book in java_books if "effective java" in book["title"].casefold()),
+                    java_books[0] if java_books else books[0])
+        reason = "it offers the strongest fit for improving practical Java design"
+    lines = ["Grounded comparison of the current catalogue candidates:"]
+    for index, book in enumerate(books, 1):
+        language_note = "JavaScript—not Java" if javascript(book) else book["category"]
+        lines.append(f"{index}. {book['title']} — {book['author']} · {language_note}")
+    if java_books and javascript_books:
+        lines.append("Java and JavaScript are different languages; the JavaScript title is not a Java textbook.")
+    lines.append(f"Best choice: {best['title']}, because {reason}.")
+    if not beginner and any("head first" in book["title"].casefold() for book in java_books):
+        lines.append("For a complete beginner, choose Head First Java instead.")
+    return "\n".join(lines)

@@ -1,18 +1,22 @@
 """REST API v2 — role-scoped gateway in front of the agent layer."""
 import datetime as dt
+import hashlib
+import hmac
+import json
 from ..timetable import reads as timetable_reads
 import logging
 import math
-from typing import Literal
+import time
+from typing import Any, Literal
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from .. import llm, metrics
+from .. import ai_provider, config, llm, metrics
 from ..agents import get_agents
 from ..agents import tools as assistant_tools
 from ..auth import (create_token, get_authenticated_user, get_current_user,
@@ -44,6 +48,7 @@ from .schemas import (
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
 EXISTING_PORTAL_ROLES = ("student", "faculty", "hod", "principal", "admin")
+ASSISTANT_CONTEXT_TTL_SECONDS = 12 * 60 * 60
 
 
 # ---------- auth ------------------------------------------------------------
@@ -172,14 +177,45 @@ def mark_all_notifications_read(user: User = Depends(get_current_user), db: Sess
 # ---------- assistant ---------------------------------------------------------
 @router.get("/assistant/capabilities", response_model=AssistantCapabilitiesResponse)
 def assistant_capabilities(user: User = Depends(require_role(*EXISTING_PORTAL_ROLES))):
-    return assistant_tools.assistant_capabilities(user.role, user.display_name)
+    result = assistant_tools.assistant_capabilities(user.role, user.display_name)
+    provider = ai_provider.runtime_status()
+    ollama_available = llm.runtime_status()["available"] is True
+    selected = None
+    if config.AI_PROVIDER in {"auto", "groq"} and provider["groq_available"] is True:
+        selected = "groq"
+    elif config.AI_PROVIDER in {"auto", "ollama"} and ollama_available:
+        selected = "ollama"
+    result.update(
+        ai_provider_mode=config.AI_PROVIDER,
+        ai_provider_status=(
+            "available" if selected else provider["groq_status"]
+            if config.AI_PROVIDER in {"auto", "groq"} else
+            "not_checked" if config.AI_PROVIDER == "ollama" else "disabled"
+        ),
+        ai_provider=selected,
+    )
+    return result
 
 
-class GeneralContextMessage(BaseModel):
+class LibraryContextBook(BaseModel):
+    """A public catalogue reference, never a stock or authorization claim."""
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=240)
+    isbn: str = Field(min_length=1, max_length=32, pattern=r"^[0-9Xx -]+$")
+    author: str = Field(min_length=1, max_length=240)
+    category: str = Field(min_length=1, max_length=120)
+
+
+class ConversationContextMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     role: Literal["user", "assistant"]
+    category: Literal["general_ai", "library_catalogue"]
     content: str
+    books: list[LibraryContextBook] = Field(default_factory=list, max_length=5)
+    proof: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    issued_at: int | None = Field(default=None, ge=0)
 
     @field_validator("content")
     @classmethod
@@ -189,13 +225,82 @@ class GeneralContextMessage(BaseModel):
             raise ValueError("context content must contain 1 to 700 characters")
         return value
 
+    @model_validator(mode="after")
+    def metadata_matches_message(self):
+        if self.books and (self.role != "assistant" or self.category != "library_catalogue"):
+            raise ValueError("catalogue references are allowed only on library assistant messages")
+        if self.role == "user" and self.proof is not None:
+            raise ValueError("context proof is allowed only on assistant messages")
+        if self.role == "user" and self.issued_at is not None:
+            raise ValueError("context timestamp is allowed only on assistant messages")
+        if self.books and self.issued_at is None:
+            raise ValueError("catalogue candidate sets require a timestamp")
+        if self.category != "library_catalogue" and self.issued_at is not None:
+            raise ValueError("context timestamp is allowed only for library messages")
+        return self
+
+
+def _context_proof(user: User, prior_user: dict, prior_assistant: dict) -> str:
+    """Bind one safe pair to the authenticated account without exposing identity."""
+    canonical = json.dumps({
+        "owner": {"username": user.username, "role": user.role},
+        "user": {key: prior_user[key] for key in ("role", "category", "content")},
+        "assistant": {
+            "role": prior_assistant["role"], "category": prior_assistant["category"],
+            "content": prior_assistant["content"], "books": prior_assistant.get("books", []),
+            "issued_at": prior_assistant.get("issued_at"),
+        },
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    signing_key = hmac.new(
+        config.jwt_secret().encode("utf-8"), b"mawos-assistant-context-v1", hashlib.sha256,
+    ).digest()
+    return hmac.new(signing_key, canonical, hashlib.sha256).hexdigest()
+
+
+def _owned_context(user: User, context: Any) -> tuple[list[dict], str]:
+    """Validate optional server-signed context; it is never authority or evidence."""
+    if context in (None, []):
+        return [], "absent"
+    if not isinstance(context, list) or len(context) > 8 or len(context) % 2:
+        return [], "invalid_shape"
+    accepted = []
+    try:
+        parsed = [ConversationContextMessage.model_validate(item) for item in context]
+    except (TypeError, ValueError):
+        return [], "invalid_shape"
+    if sum(len(item.content) for item in parsed) > 4000:
+        return [], "over_limit"
+    expired_candidate = False
+    for index in range(0, len(parsed), 2):
+        user_item, assistant_item = parsed[index:index + 2]
+        if ((user_item.role, assistant_item.role) != ("user", "assistant")
+                or user_item.category != assistant_item.category):
+            return [], "invalid_shape"
+        prior_user = user_item.model_dump(exclude={"proof"})
+        prior_assistant = assistant_item.model_dump(exclude={"proof"})
+        supplied = assistant_item.proof
+        valid_proof = supplied and hmac.compare_digest(
+            supplied, _context_proof(user, prior_user, prior_assistant))
+        if not valid_proof:
+            return [], "unsigned" if not supplied else "signature_invalid"
+        issued_at = prior_assistant.get("issued_at")
+        if issued_at is not None:
+            age = int(dt.datetime.now(dt.timezone.utc).timestamp()) - issued_at
+            prior_assistant["candidate_set_expired"] = not (-300 <= age <= ASSISTANT_CONTEXT_TTL_SECONDS)
+            expired_candidate = expired_candidate or prior_assistant["candidate_set_expired"]
+        prior_assistant["proof"] = supplied
+        accepted.extend((prior_user, prior_assistant))
+    return accepted, "accepted_expired" if expired_candidate else "accepted"
+
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: str
-    context_topic: ChatTopic | None = None
-    general_context: list[GeneralContextMessage] = Field(default_factory=list, max_length=6)
+    # Optional enhancement fields are intentionally loose at the HTTP boundary.
+    # The route discards them by category if they cannot be safely validated.
+    context_topic: str | None = None
+    conversation_context: Any = None
 
     @field_validator("message")
     @classmethod
@@ -207,20 +312,38 @@ class ChatRequest(BaseModel):
             raise ValueError("message must be at most 1000 characters")
         return value
 
-    @field_validator("general_context")
-    @classmethod
-    def context_total_is_bounded(cls, value: list[GeneralContextMessage]):
-        if sum(len(item.content) for item in value) > 3000:
-            raise ValueError("general context must be at most 3000 characters")
-        return value
-
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, user: User = Depends(require_role(*EXISTING_PORTAL_ROLES)),
                db: Session = Depends(get_session)):
-    return await get_agents()["orchestrator_agent"].handle_chat(
-        db, user, body.message, context_topic=body.context_topic,
-        general_context=[item.model_dump() for item in body.general_context])
+    started = time.perf_counter()
+    context, context_status = _owned_context(user, body.conversation_context)
+    topic = body.context_topic if body.context_topic in ChatTopic.__args__ else None
+    if body.context_topic is not None and topic is None and context_status == "absent":
+        context_status = "topic_invalid"
+    try:
+        result = await get_agents()["orchestrator_agent"].handle_chat(
+            db, user, body.message, context_topic=topic, conversation_context=context)
+        if ((result.get("category") == "general_ai" and result.get("mode") == "general_ai")
+                or result.get("category") == "library_catalogue"):
+            prior_user = {"role": "user", "category": result["category"],
+                          "content": body.message[:700]}
+            prior_assistant = {
+                "role": "assistant", "category": result["category"],
+                "content": result["text"][:700], "books": result.get("context_books", []),
+            }
+            if prior_assistant["books"]:
+                prior_assistant["issued_at"] = int(dt.datetime.now(dt.timezone.utc).timestamp())
+                result["context_issued_at"] = prior_assistant["issued_at"]
+            # The HMAC key remains server-only. The browser only returns this server-issued proof.
+            result["context_proof"] = _context_proof(user, prior_user, prior_assistant)
+        return result
+    finally:
+        logger.info(
+            "assistant_request route=/api/chat context_present=%s context_status=%s elapsed_ms=%.1f",
+            body.conversation_context not in (None, []), context_status,
+            (time.perf_counter() - started) * 1000,
+        )
 
 
 # ---------- student portal ------------------------------------------------------

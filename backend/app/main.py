@@ -50,10 +50,10 @@ async def lifespan(app: FastAPI):
         if freshly_seeded:
             print("[MAWOS] fresh demo data seeded — bootstrapping evaluations…")
             bootstrap_evaluations(agents)
-    # Ollama is optional and is checked only for a low-confidence chat turn;
-    # application startup must never block on or depend on it.
-    mode = (f"hybrid router, tau {hybrid_router.TAU:.2f}, local runtime model "
-            f"{config.OLLAMA_MODEL} checked on demand")
+    # Providers are optional and checked only for eligible generative turns;
+    # application startup must never block on or depend on either one.
+    mode = (f"hybrid router, tau {hybrid_router.TAU:.2f}, provider policy "
+            f"{config.AI_PROVIDER}, providers checked on demand")
     print(f"[MAWOS] {len(agents)} agents online · AI mode: {mode}")
     task = asyncio.create_task(_proactive_loop(agents))
     yield

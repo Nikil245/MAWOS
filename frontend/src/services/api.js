@@ -19,6 +19,87 @@ export function isAbortError(error) {
   return error?.name === "AbortError";
 }
 
+const CHAT_TOPICS = new Set([
+  "attendance", "fees", "marks", "eligibility", "greeting", "thanks", "identity",
+  "help", "attendance_meaning", "attendance_requirement", "cie", "eligibility_meaning",
+  "fees_meaning", "improve_attendance", "mawos", "reason_codes", "profile", "rag",
+]);
+const CONTEXT_CATEGORIES = new Set(["general_ai", "library_catalogue"]);
+const CONTEXT_PROOF = /^[0-9a-f]{64}$/;
+const ISBN = /^[0-9Xx -]{1,32}$/;
+
+function safeContextBooks(value) {
+  if (!Array.isArray(value) || value.length > 5) return null;
+  const books = [];
+  for (const book of value) {
+    if (!book || typeof book !== "object"
+      || typeof book.title !== "string" || !book.title || book.title.length > 240
+      || typeof book.isbn !== "string" || !ISBN.test(book.isbn)
+      || typeof book.author !== "string" || !book.author || book.author.length > 240
+      || typeof book.category !== "string" || !book.category || book.category.length > 120) return null;
+    books.push({ title: book.title, isbn: book.isbn, author: book.author, category: book.category });
+  }
+  return books;
+}
+
+function safeConversationContext(value) {
+  try {
+    if (!Array.isArray(value) || value.length === 0 || value.length > 8 || value.length % 2) return [];
+    const result = [];
+    let characters = 0;
+    for (let index = 0; index < value.length; index += 2) {
+      const priorUser = value[index];
+      const priorAssistant = value[index + 1];
+      if (!priorUser || !priorAssistant || priorUser.role !== "user"
+        || priorAssistant.role !== "assistant"
+        || !CONTEXT_CATEGORIES.has(priorUser.category)
+        || priorAssistant.category !== priorUser.category
+        || typeof priorUser.content !== "string" || !priorUser.content.trim()
+        || typeof priorAssistant.content !== "string" || !priorAssistant.content.trim()
+        || priorUser.content.length > 700 || priorAssistant.content.length > 700
+        || !CONTEXT_PROOF.test(priorAssistant.proof || "")) return [];
+      const userMessage = {
+        role: "user", category: priorUser.category, content: priorUser.content,
+      };
+      const assistantMessage = {
+        role: "assistant", category: priorAssistant.category,
+        content: priorAssistant.content, proof: priorAssistant.proof,
+      };
+      if (priorAssistant.category === "library_catalogue") {
+        const books = safeContextBooks(priorAssistant.books);
+        if (books === null) return [];
+        assistantMessage.books = books;
+        if (books.length) {
+          if (!Number.isSafeInteger(priorAssistant.issued_at) || priorAssistant.issued_at < 0) return [];
+          assistantMessage.issued_at = priorAssistant.issued_at;
+        }
+      }
+      characters += userMessage.content.length + assistantMessage.content.length;
+      if (characters > 4000) return [];
+      result.push(userMessage, assistantMessage);
+    }
+    // This assertion also catches exotic values/getters before request() reaches fetch.
+    JSON.stringify(result);
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+export function buildChatPayload(message, contextTopic, conversationContext) {
+  const payload = { message };
+  try {
+    if (typeof contextTopic === "string" && CHAT_TOPICS.has(contextTopic)) {
+      payload.context_topic = contextTopic;
+    }
+    const safeContext = safeConversationContext(conversationContext);
+    if (safeContext.length) payload.conversation_context = safeContext;
+  } catch {
+    // Optional conversational state must never prevent sending the current message.
+  }
+  return payload;
+}
+
 function errorCategory(status) {
   if (status === 401) return "authentication";
   if (status === 403) return "authorization";
@@ -182,14 +263,10 @@ export const api = {
     request(path, { token, body, method: "POST" }),
   assistantCapabilities: (token, signal) =>
     request("/assistant/capabilities", { token, signal }),
-  chat: (token, message, signal, contextTopic = null, generalContext = []) =>
+  chat: (token, message, signal, contextTopic = null, conversationContext = []) =>
     request("/chat", {
       token,
-      body: {
-        message,
-        context_topic: contextTopic,
-        general_context: generalContext,
-      },
+      body: buildChatPayload(message, contextTopic, conversationContext),
       signal,
     }),
   metrics: (token) => request("/metrics/summary", { token }),

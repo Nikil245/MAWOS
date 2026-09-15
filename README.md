@@ -29,7 +29,7 @@ flowchart LR
   DOCKER -. deploys .-> API
 ```
 
-The backend also supports SQLite for isolated local/demo and test use. PostgreSQL schema changes are Alembic-managed. The optional academic assistant uses permission-checked, role-scoped tools with deterministic routing and an optional local Ollama tier; it does not mutate records through chat.
+The backend also supports SQLite for isolated local/demo and test use. PostgreSQL schema changes are Alembic-managed. The optional academic assistant uses permission-checked, role-scoped tools with deterministic routing, an optional hosted Groq tier for sanitized general learning, and optional local Ollama fallback; it does not mutate records through chat.
 
 ## Implemented modules
 
@@ -47,7 +47,7 @@ The backend also supports SQLite for isolated local/demo and test use. PostgreSQ
 | Parent portal | Admin-created accounts with explicitly linked, read-only child dashboard, timetable, event, notification, and library views; temporary passwords must change at first login. |
 | Library Agent | Catalogue, reservations/slips, librarian physical pickup/return confirmation, seven-day loans, ₹1/day overdue policy, recommendations, and parent summaries. |
 | Admissions/Admin | Admin verifies applications, runs merit, allots seats against intake, enrols applicants, and manages parent/librarian accounts. |
-| Academic assistant/orchestrator | Authenticated role-scoped capability/tool routing. Optional Ollama is checked only for eligible requests; deterministic routing remains available. |
+| Academic assistant/orchestrator | Authenticated deterministic routing plus optional Groq/local generation for sanitized general-learning turns. |
 
 ## Roles
 
@@ -105,6 +105,16 @@ MAWOS_DATABASE_URL=postgresql+psycopg://mawos_app:REPLACE_WITH_PASSWORD@127.0.0.
 MAWOS_DOCKER_DATABASE_URL=postgresql+psycopg://mawos_app:REPLACE_WITH_PASSWORD@host.docker.internal:5432/mawos
 MAWOS_JWT_SECRET=REPLACE_WITH_A_LONG_RANDOM_SECRET
 MAWOS_SEED_DEMO_DATA=false
+MAWOS_AI_PROVIDER=auto
+GROQ_API_KEY=<YOUR_GROQ_API_KEY>
+MAWOS_GROQ_BASE_URL=https://api.groq.com/openai/v1
+MAWOS_GROQ_MODEL=openai/gpt-oss-20b
+MAWOS_GROQ_TIMEOUT_SECONDS=30
+MAWOS_GROQ_MAX_TOKENS=180
+MAWOS_GROQ_MAX_INPUT_CHARS=6000
+MAWOS_GROQ_HEALTH_TTL=30
+MAWOS_GROQ_RETRY_COOLDOWN=5
+MAWOS_AI_REQUESTS_PER_MINUTE=6
 ```
 
 Create the development database/roles through your PostgreSQL administration process. Use a database-owner/migration role for DDL and a restricted application role at runtime. MAWOS does not create PostgreSQL tables, seed PostgreSQL, reset a database, or generate timetables on startup.
@@ -148,13 +158,36 @@ docker compose config --quiet
 docker compose build
 docker compose up -d
 docker compose ps
-docker compose logs -f backend frontend ollama
+docker compose logs -f backend frontend
 ```
 
-This starts frontend, backend, and Ollama; backend waits for Ollama health. The
-Docker backend receives Docker-safe database and Ollama URLs, while native
-Alembic/scripts continue to use loopback URLs. The Ollama model remains an
-explicit download (`docker compose exec ollama ollama pull qwen2.5:3b`).
+This starts frontend and backend. In `auto` mode, Groq is used only after a
+successful authenticated model-list check; otherwise MAWOS tries an available
+local Ollama instance and finally degrades to deterministic-only operation.
+The Groq key is passed only to the backend runtime, never to the frontend build.
+Groq lists the configurable default `openai/gpt-oss-20b` as a
+[production model](https://console.groq.com/docs/models), served through its
+[OpenAI-compatible endpoint](https://console.groq.com/docs/openai).
+
+Start the optional local fallback explicitly:
+
+```bash
+docker compose --profile local-ai up -d
+docker compose --profile local-ai exec ollama ollama pull qwen2.5:3b
+```
+
+Ollama turns default to a 90-second deadline via
+`MAWOS_OLLAMA_TIMEOUT_SECONDS`; generated answers default to 160 tokens, and
+`MAWOS_OLLAMA_KEEP_ALIVE_SECONDS=300` keeps the model warm between normal
+requests without background polling. See `docs/DOCKER.md` for validated limits.
+
+Provider modes are `auto` (Groq → Ollama → deterministic-only), `groq`
+(Groq only), `ollama` (local only), and `disabled` (no generative calls).
+Only bounded general-learning text and sanitized title/author/category catalogue
+metadata can enter this layer. Private records, live stock counts, borrower data,
+database access, JWTs, internal IDs, and credentials cannot. A per-user limit
+applies only to generative turns; deterministic record and catalogue searches do
+not consume it.
 
 ### B. Fresh Docker PostgreSQL
 
@@ -234,5 +267,5 @@ export MAWOS_POSTGRES_TEST_URL='postgresql+psycopg://TEST_USER:TEST_PASSWORD@127
 - No payment gateway, QR/barcode event attendance, or external calendar sync.
 - No Redis distributed event bus/cache.
 - Library fines are for in-person collection, not online payment.
-- The assistant is role-scoped/tool-backed; Ollama is optional.
+- The assistant is role-scoped/tool-backed; Groq and Ollama are optional, and deterministic record answers require neither.
 - PostgreSQL tests need an explicit isolated `MAWOS_POSTGRES_TEST_URL`.

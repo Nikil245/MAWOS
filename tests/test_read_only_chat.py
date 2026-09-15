@@ -4,14 +4,15 @@ import datetime as dt
 import json
 
 from fastapi.testclient import TestClient
+import pytest
 from sqlalchemy.orm import Session
 
-from backend.app import llm, router
+from backend.app import ai_provider, config, llm, router
 from backend.app.agents import tools
 from backend.app.auth import hash_password
 from backend.app.main import app
 from backend.app.models import (
-    AttendanceRecord, Department, Faculty, FeeRecord, HallTicket, IntentLog,
+    AttendanceRecord, AttendanceSummary, Department, Faculty, FeeRecord, HallTicket, IntentLog,
     MarksRecord, Student, Subject, TeachingAssignment, User,
 )
 from backend.app.api.schemas import AssistantCapabilitiesResponse
@@ -72,6 +73,121 @@ def _domain_snapshot(db):
 def test_chat_requires_authentication():
     response = TestClient(app).post("/api/chat", json={"message": "Show attendance"})
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize("question", [
+    "show me my attendance status",
+    "show my attendance status with subject name",
+])
+def test_plain_attendance_request_succeeds_without_context_or_any_provider(
+        question, agents, monkeypatch):
+    client, headers = _headers("4MT23AI001")
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("plain attendance request reached a model")
+
+    monkeypatch.setattr(llm, "chat_async", forbidden)
+    monkeypatch.setattr(ai_provider, "_groq_request", forbidden)
+    response = client.post(
+        "/api/chat", headers=headers,
+        json={"message": question},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["category"] == "personal_record"
+    assert body["mode"] == "lexicon"
+    assert "attendance" in body["text"].lower()
+
+
+def test_attendance_api_is_authenticated_deterministic_and_subject_named(
+        agents, db, monkeypatch):
+    """The production HTTP flow must not depend on either AI provider."""
+    client, headers = _headers("4MT23AI001")
+    summary = db.query(AttendanceSummary).filter_by(
+        usn="4MT23AI001", subject_code="23AI51").first()
+    if summary is None:
+        summary = AttendanceSummary(usn="4MT23AI001", subject_code="23AI51")
+        db.add(summary)
+    summary.classes_held, summary.classes_attended = 10, 9
+    summary.percentage, summary.shortage = 90.0, False
+    db.commit()
+    executed = []
+    original = tools.execute_chat
+
+    def tracked(*args):
+        executed.append(args[3])
+        return original(*args)
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("attendance request reached an AI provider")
+
+    monkeypatch.setattr(tools, "execute_chat", tracked)
+    monkeypatch.setattr(llm, "chat_async", forbidden)
+    monkeypatch.setattr(ai_provider, "_groq_request", forbidden)
+    monkeypatch.setattr(config, "AI_PROVIDER", "disabled")
+    response = client.post("/api/chat", headers=headers,
+                           json={"message": "show me my attendance status"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert executed == ["get_attendance"]
+    assert body["source_label"] == "Deterministic answer"
+    assert "Overall attendance:" in body["text"]
+    assert "Machine Learning (23AI51)" in body["text"]
+    assert "4MT23AI002" not in body["text"]
+    assert body["routing"]["attempted_llm"] is False
+
+
+def test_deterministic_attendance_is_outside_generative_rate_limit(agents, monkeypatch):
+    monkeypatch.setattr(config, "AI_GENERATIVE_REQUESTS_PER_MINUTE", 1)
+    assert ai_provider._rate_allowed("student:rate-test") is True
+    assert ai_provider._rate_allowed("student:rate-test") is False
+    client, headers = _headers("4MT23AI001")
+    response = client.post(
+        "/api/chat", headers=headers,
+        json={"message": "show my subject-wise attendance"},
+    )
+    assert response.status_code == 200
+    assert response.json()["mode"] == "lexicon"
+
+
+def test_tampered_context_does_not_block_deterministic_attendance(agents, monkeypatch):
+    client, headers = _headers("4MT23AI001")
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("attendance with rejected context reached Ollama")
+
+    monkeypatch.setattr(llm, "chat_async", forbidden)
+    response = client.post("/api/chat", headers=headers, json={
+        "message": "show me my attendance status",
+        "conversation_context": [
+            {"role": "user", "category": "general_ai", "content": "Explain SQL."},
+            {"role": "assistant", "category": "general_ai", "content": "Tampered.",
+             "proof": "a" * 64},
+        ],
+    })
+
+    assert response.status_code == 200
+    assert response.json()["category"] == "personal_record"
+
+
+def test_chat_request_log_contains_only_safe_context_metadata(caplog):
+    client, headers = _headers("4MT23AI001")
+    with caplog.at_level("INFO", logger="backend.app.api.routes"):
+        response = client.post(
+            "/api/chat", headers=headers,
+            json={"message": "show me my attendance status"},
+        )
+
+    assert response.status_code == 200
+    line = next(record.getMessage() for record in caplog.records
+                if "assistant_request route=/api/chat" in record.getMessage())
+    assert "context_present=False" in line
+    assert "context_status=absent" in line
+    assert "elapsed_ms=" in line
+    assert "attendance status" not in line
+    assert "4MT23AI001" not in line
 
 
 def test_chat_scope_and_response_contract_do_not_execute_other_services(agents, db, monkeypatch):
@@ -272,6 +388,22 @@ def test_capability_endpoint_is_authenticated_and_does_not_flush_or_commit(db, m
     assert TestClient(app).get("/api/assistant/capabilities").status_code == 401
 
 
+def test_capability_provider_status_requires_a_completed_health_check(db, monkeypatch):
+    _ensure_chat_scope(db)
+    monkeypatch.setattr(config, "AI_PROVIDER", "auto")
+    monkeypatch.setenv("GROQ_API_KEY", "placeholder-test-key")
+    client, headers = _headers("4MT23AI001")
+    before = client.get("/api/assistant/capabilities", headers=headers).json()
+    assert before["ai_provider_status"] == "not_checked"
+    assert before["ai_provider"] is None
+    assert "placeholder-test-key" not in json.dumps(before)
+
+    ai_provider._set_groq_health(True)
+    after = client.get("/api/assistant/capabilities", headers=headers).json()
+    assert after["ai_provider_status"] == "available"
+    assert after["ai_provider"] == "groq"
+
+
 def test_capability_endpoint_uses_authenticated_backend_role_and_canonical_schema(db):
     _ensure_chat_scope(db)
     expected_roles = {
@@ -290,38 +422,28 @@ def test_capability_endpoint_uses_authenticated_backend_role_and_canonical_schem
     assert invalid.status_code == 401
 
 
-def test_llm_path_rejects_unsupported_forged_tool_and_falls_back(agents, db, monkeypatch):
+def test_attendance_does_not_offer_a_forged_tool_to_any_model(agents, db, monkeypatch):
     user = db.query(User).filter_by(username="4MT23AI001").one()
     calls = []
-
-    async def fake_decide(query, budget):
-        result = llm.classify_keyword(query)
-        return result, router.Decision("llm", 0.0, True, "mocked LLM route")
 
     async def fake_chat(messages, tools=None, budget=None):
         calls.append((messages, tools))
         return llm.OllamaResult(message={"role": "assistant", "content": "", "tool_calls": [{
             "function": {"name": "get_placements", "arguments": {"usn": "4MT23AI002"}}}]})
 
-    monkeypatch.setattr(router, "decide_async", fake_decide)
     monkeypatch.setattr(llm, "chat_async", fake_chat)
     response = asyncio.run(agents["orchestrator_agent"].handle_chat(
         db, user, "attendance"))
 
-    assert calls
-    assert {item["function"]["name"] for item in calls[0][1]} <= tools.CHAT_READ_ONLY_TOOLS
+    assert calls == []
     assert response["mode"] == "lexicon"
-    assert response["routing"]["fallback_from"] == "llm"
+    assert response["routing"]["attempted_llm"] is False
     assert response["tools_used"][0]["name"] == "get_attendance"
 
 
-def test_llm_forged_usn_is_rejected_before_tool_execution(agents, db, monkeypatch):
+def test_attendance_does_not_send_authenticated_identity_to_a_model(agents, db, monkeypatch):
     user = db.query(User).filter_by(username="4MT23AI001").one()
     requests = []
-
-    async def fake_decide(query, budget):
-        result = llm.classify_keyword(query)
-        return result, router.Decision("llm", 0.0, True, "mocked LLM route")
 
     async def fake_chat(messages, tools=None, budget=None):
         requests.append(messages)
@@ -335,13 +457,12 @@ def test_llm_forged_usn_is_rejected_before_tool_execution(agents, db, monkeypatc
             "tool": evidence["tool"], "evidence_ref": evidence["evidence_ref"],
         })})
 
-    monkeypatch.setattr(router, "decide_async", fake_decide)
     monkeypatch.setattr(llm, "chat_async", fake_chat)
     response = asyncio.run(agents["orchestrator_agent"].handle_chat(
         db, user, "attendance"))
 
-    assert len(requests) == 1
+    assert requests == []
     assert response["mode"] == "lexicon"
-    assert response["fallback_code"] == "tool_denied"
-    assert response["routing"]["attempted_llm"] is True
+    assert response["fallback_code"] is None
+    assert response["routing"]["attempted_llm"] is False
     assert response["routing"]["accepted_llm"] is False

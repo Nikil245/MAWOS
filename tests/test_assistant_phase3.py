@@ -204,10 +204,15 @@ def test_all_categories_never_write_or_persist_chat(agents, db, monkeypatch):
     assert db.query(IntentLog).count() == before["intent_logs"]
 
 
-def test_api_context_rejects_history_identity_and_unbounded_input(agents):
+def test_api_discards_invalid_optional_topic_but_rejects_invalid_required_input(agents):
     client, headers = _headers("4MT23AI001")
-    for payload in ({"message": "Why?", "context_topic": "4MT23AI001"},
-                    {"message": "Why?", "history": [{"text": "private"}]},
+    response = client.post(
+        "/api/chat", headers=headers,
+        json={"message": "show me my attendance status", "context_topic": "4MT23AI001"},
+    )
+    assert response.status_code == 200
+    assert response.json()["category"] == "personal_record"
+    for payload in ({"message": "Why?", "history": [{"text": "private"}]},
                     {"message": "Why?", "context_topic": {"usn": "4MT23AI001"}},
                     {"message": "x" * 1001}):
         assert client.post("/api/chat", headers=headers, json=payload).status_code == 422

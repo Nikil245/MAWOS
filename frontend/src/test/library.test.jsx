@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LibrarySlip, LibrarySummaryCard, LibrarianLibrary, LibrarianManagement, StudentLibrary } from '../pages/library/Library';
 import { RoleRoute } from '../components/routes';
 import { defaultRouteByRole, isRouteAllowedForRole } from '../routes/roleRoutes';
 
 const mocks = vi.hoisted(() => ({ request: vi.fn(), download: vi.fn(), role: 'student' }));
-vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ token: 'library-token', user: { role: mocks.role } }) }));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ token: 'library-token', user: { role: mocks.role, username: `${mocks.role}.user` } }) }));
 vi.mock('../services/api', () => ({ api: { libraryRequest: mocks.request, downloadLibrarySlip: mocks.download } }));
 const book = { id: 11, isbn: '9780000000001', title: 'Database Systems', author: 'Reader', category: 'Computing', departments: ['AIML'], total_copies: 2, available_copies: 1, is_active: true, average_rating: 5 };
 const due = '2030-09-14T10:00:00+00:00';
@@ -14,6 +14,9 @@ const summary = { issued_count: 1, unpaid_total: '10.00', paid_total: '5.00', es
 const reservation = { id: 21, book_id: 11, title: book.title, status: 'PENDING_PICKUP', pickup_deadline: due, slip_code: '012345', student_name: 'Asha', student_usn: '4MT23AI001' };
 const issued = { id: 31, title: book.title, student_usn: '4MT23AI001', status: 'ISSUED', due_at: due, estimated_fine: '3.00' };
 const fine = { id: 41, reason: 'Missed library pickup', status: 'UNPAID', amount: '10.00', created_at: due, student_usn: '4MT23AI001' };
+const storedSessionValues = () => Array.from(
+  { length: sessionStorage.length }, (_, index) => sessionStorage.getItem(sessionStorage.key(index)),
+).join('\n');
 function defaults(_token, path, body) {
   if (body !== undefined) return Promise.resolve(path === '/student/library/reservations' ? reservation : { ...issued, id: 31 });
   if (path.includes('/slip')) return Promise.resolve(reservation);
@@ -31,7 +34,20 @@ function defaults(_token, path, body) {
 function student(initialEntry = '/student/library') { return render(<MemoryRouter initialEntries={[initialEntry]}><Routes><Route path="/student/library" element={<StudentLibrary />} /><Route path="/student/library/slips/:reservationId" element={<LibrarySlip />} /></Routes></MemoryRouter>); }
 
 describe('physical library UI', () => {
-  beforeEach(() => { mocks.role = 'student'; mocks.request.mockReset().mockImplementation(defaults); mocks.download.mockReset().mockResolvedValue(); });
+  beforeEach(() => { sessionStorage.clear(); mocks.role = 'student'; mocks.request.mockReset().mockImplementation(defaults); mocks.download.mockReset().mockResolvedValue(); });
+
+  it('restores a safe catalogue search after route navigation', async () => {
+    render(<MemoryRouter initialEntries={['/student/library']}><Routes>
+      <Route path="/student/library" element={<><StudentLibrary /><Link to="/other">Leave library</Link></>} />
+      <Route path="/other" element={<><p>Another page</p><Link to="/student/library">Return to library</Link></>} />
+    </Routes></MemoryRouter>);
+    fireEvent.change(await screen.findByLabelText('Search catalogue'), { target: { value: 'Machine Learning' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }));
+    await waitFor(() => expect(sessionStorage.length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('link', { name: 'Leave library' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Return to library' }));
+    expect(await screen.findByLabelText('Search catalogue')).toHaveValue('Machine Learning');
+  });
 
   it('searches, reserves, opens an owned slip and downloads a PDF', async () => {
     student();
@@ -123,6 +139,8 @@ describe('physical library UI', () => {
     expect(await screen.findByText(/Temporary-secret-123!/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'I have saved them' }));
     expect(screen.queryByText(/Temporary-secret-123!/)).not.toBeInTheDocument();
+    expect(storedSessionValues()).not.toContain('Temporary-secret-123!');
+    expect(storedSessionValues()).not.toContain('Desk User');
     fireEvent.click(await screen.findByRole('button', { name: 'Deactivate' }));
     await waitFor(() => expect(mocks.request).toHaveBeenCalledWith('library-token', '/admin/librarians/71', { display_name: 'Desk User', active: false }, 'PUT'));
   });
@@ -158,6 +176,8 @@ describe('physical library UI', () => {
     for (const [label, value] of [['isbn', '9780000000002'], ['title', 'New title'], ['author', 'New author'], ['category', 'Computing'], ['Department codes (comma separated, blank for all)', 'AIML']]) {
       fireEvent.change(screen.getByLabelText(label), { target: { value } });
     }
+    expect(storedSessionValues()).not.toContain('New title');
+    expect(storedSessionValues()).not.toContain('9780000000002');
     fireEvent.click(screen.getByRole('button', { name: 'Save book' }));
     await waitFor(() => expect(mocks.request).toHaveBeenCalledWith('library-token', '/librarian/library/books', expect.objectContaining({ title: 'New title', departments: ['AIML'], total_copies: 1 }), 'POST'));
     fireEvent.click(await screen.findByRole('button', { name: 'Edit', exact: true }));

@@ -41,14 +41,15 @@ before running. Enforcement is in code, never in the prompt.
 **Q: how do you stop the LLM leaking another student's marks?** It physically
 cannot: the tool rewrites the USN to the caller's own before touching the DB.
 
-### 4. `backend/app/agents/orchestrator.py` + `backend/app/llm.py`
-The brain. LLM mode: build role-filtered schemas → Ollama chat → if the reply
-contains `tool_calls`, execute each, append results, loop (≤3 rounds) → final
-grounded answer. Fallback mode: weighted-keyword classifier → the one mapped
-tool → a deterministic formatter. Both log to `intent_logs`, so the LLM/
-fallback split is a measured quantity. `llm.py` also holds the lexicon — note
-the comments marking the three mechanical fixes made after the benchmark
-exposed a scoring tie, a regex gap and a missing aggregate signal.
+### 4. `backend/app/agents/orchestrator.py` + `backend/app/llm.py` + `backend/app/ai_provider.py`
+The brain. Recognized MAWOS/private intents execute a permission-checked,
+read-only tool and use a deterministic server formatter. Safe general-learning
+turns go through the provider policy: verified Groq first in `auto`, optional
+local Ollama fallback, or a safe unavailable response. The hosted provider gets
+no tools or database data. A bounded legacy Ollama selection path remains for
+ambiguous supported record phrasing, but the authorized result is still rendered
+by the server. Routing is logged to `intent_logs`, and `llm.py` retains the
+measured lexicon/gate implementation.
 
 ### 5. `backend/app/agents/timetable.py`
 Constraint solver: randomized greedy, subjects placed hardest-first, with

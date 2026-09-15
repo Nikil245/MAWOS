@@ -62,24 +62,30 @@ def test_native_url_remains_loopback_for_alembic_environment():
     assert env["MAWOS_DATABASE_URL"].split("@")[1].startswith("127.0.0.1:")
 
 
-def test_ollama_is_a_default_healthy_backend_dependency():
+def test_ollama_is_optional_and_backend_accepts_hosted_provider_configuration():
     services = _compose(_external_environment(), "--services")
     assert services.returncode == 0, services.stderr
-    assert {"backend", "frontend", "ollama"} <= set(services.stdout.splitlines())
+    assert set(services.stdout.splitlines()) == {"backend", "frontend"}
 
-    rendered = _compose(_external_environment(), "--format", "json")
+    env = {**_external_environment(), "COMPOSE_PROFILES": "local-ai"}
+    rendered = _compose(env, "--format", "json")
     assert rendered.returncode == 0, rendered.stderr
     config = json.loads(rendered.stdout)
     ollama = config["services"]["ollama"]
-    assert not ollama.get("profiles")
+    assert ollama["profiles"] == ["local-ai"]
     assert ollama["volumes"][0]["source"] == "ollama_data"
     assert ollama["healthcheck"]["test"] == ["CMD", "ollama", "list"]
-    assert config["services"]["backend"]["depends_on"]["ollama"]["condition"] == "service_healthy"
+    assert "ollama" not in config["services"]["backend"].get("depends_on", {})
+    assert config["services"]["backend"]["environment"]["MAWOS_AI_PROVIDER"] == "auto"
+    assert config["services"]["backend"]["environment"]["MAWOS_GROQ_MODEL"] == "openai/gpt-oss-20b"
     assert config["services"]["backend"]["environment"]["MAWOS_OLLAMA_HOST"] == "http://ollama:11434"
+    assert config["services"]["backend"]["environment"]["MAWOS_OLLAMA_TIMEOUT_SECONDS"] == "90"
+    assert config["services"]["backend"]["environment"]["MAWOS_OLLAMA_KEEP_ALIVE_SECONDS"] == "300"
 
 
 def test_docker_ollama_has_no_database_network_or_credentials():
-    rendered = _docker_database_compose(_external_environment(), "--format", "json")
+    env = {**_external_environment(), "COMPOSE_PROFILES": "local-ai"}
+    rendered = _docker_database_compose(env, "--format", "json")
     assert rendered.returncode == 0, rendered.stderr
     config = json.loads(rendered.stdout)
     services = config["services"]
@@ -91,3 +97,14 @@ def test_docker_ollama_has_no_database_network_or_credentials():
     assert backend_networks & postgres_networks
     assert not any("DATABASE" in key or "POSTGRES" in key
                    for key in services["ollama"].get("environment", {}))
+
+
+def test_groq_key_is_forwarded_only_to_backend_runtime():
+    marker = "compose-test-key-not-real"
+    env = {**_external_environment(), "GROQ_API_KEY": marker}
+    rendered = _compose(env, "--format", "json")
+    assert rendered.returncode == 0, rendered.stderr
+    config = json.loads(rendered.stdout)
+    assert config["services"]["backend"]["environment"]["GROQ_API_KEY"] == marker
+    assert marker not in json.dumps(config["services"]["frontend"])
+    assert "GROQ_API_KEY" not in config["services"]["frontend"].get("build", {}).get("args", {})

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { api, ApiError, setUnauthorizedHandler } from '../services/api';
+import { clearAllUserSessionState } from '../hooks/useUserSessionState';
 
 const AuthContext = createContext(null);
 const TOKEN_KEY = 'mawos_token';
@@ -7,6 +8,7 @@ const USER_KEY = 'mawos_user';
 const TRANSIENT_KEYS = ['mawos_return_to', 'mawos_session_only'];
 
 function clearRoleState() {
+  clearAllUserSessionState();
   for (const storage of [localStorage, sessionStorage]) {
     for (let i = storage.length - 1; i >= 0; i -= 1) {
       const key = storage.key(i);

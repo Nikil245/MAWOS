@@ -15,13 +15,24 @@ services:
       # receive the separate gateway URL only; Compose fails before startup
       # when external mode is selected without it.
       MAWOS_DATABASE_URL: ${MAWOS_DOCKER_DATABASE_URL:?set MAWOS_DOCKER_DATABASE_URL in .env for external Docker deployments}
-      # Keep host-native Ollama configuration separate. The backend container
-      # reaches the default Ollama service over the private Compose network.
+      MAWOS_AI_PROVIDER: ${MAWOS_AI_PROVIDER:-auto}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      MAWOS_GROQ_BASE_URL: ${MAWOS_GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+      MAWOS_GROQ_MODEL: ${MAWOS_GROQ_MODEL:-openai/gpt-oss-20b}
+      MAWOS_GROQ_TIMEOUT_SECONDS: ${MAWOS_GROQ_TIMEOUT_SECONDS:-30}
+      MAWOS_GROQ_MAX_TOKENS: ${MAWOS_GROQ_MAX_TOKENS:-180}
+      MAWOS_GROQ_MAX_INPUT_CHARS: ${MAWOS_GROQ_MAX_INPUT_CHARS:-6000}
+      MAWOS_GROQ_HEALTH_TTL: ${MAWOS_GROQ_HEALTH_TTL:-30}
+      MAWOS_GROQ_RETRY_COOLDOWN: ${MAWOS_GROQ_RETRY_COOLDOWN:-5}
+      MAWOS_AI_REQUESTS_PER_MINUTE: ${MAWOS_AI_REQUESTS_PER_MINUTE:-6}
+      # Keep host-native Ollama configuration separate. When the optional
+      # local-ai profile is enabled, the backend reaches it privately here.
       MAWOS_OLLAMA_HOST: ${MAWOS_DOCKER_OLLAMA_HOST:-http://ollama:11434}
       MAWOS_OLLAMA_MODEL: ${MAWOS_OLLAMA_MODEL:-qwen2.5:3b}
-      MAWOS_OLLAMA_TIMEOUT: ${MAWOS_OLLAMA_TIMEOUT:-20}
+      MAWOS_OLLAMA_TIMEOUT_SECONDS: ${MAWOS_OLLAMA_TIMEOUT_SECONDS:-${MAWOS_OLLAMA_TIMEOUT:-90}}
       MAWOS_OLLAMA_CONTEXT: ${MAWOS_OLLAMA_CONTEXT:-2048}
-      MAWOS_OLLAMA_MAX_OUTPUT_TOKENS: ${MAWOS_OLLAMA_MAX_OUTPUT_TOKENS:-192}
+      MAWOS_OLLAMA_MAX_OUTPUT_TOKENS: ${MAWOS_OLLAMA_MAX_OUTPUT_TOKENS:-160}
+      MAWOS_OLLAMA_KEEP_ALIVE_SECONDS: ${MAWOS_OLLAMA_KEEP_ALIVE_SECONDS:-300}
       MAWOS_OLLAMA_MAX_RESPONSE_CHARS: ${MAWOS_OLLAMA_MAX_RESPONSE_CHARS:-12000}
       MAWOS_OLLAMA_MAX_ROUNDS: ${MAWOS_OLLAMA_MAX_ROUNDS:-2}
       MAWOS_OLLAMA_CONCURRENCY: ${MAWOS_OLLAMA_CONCURRENCY:-1}
@@ -39,9 +50,6 @@ services:
       MAWOS_PLACEMENT_DOCUMENT_MAX_BYTES: ${MAWOS_PLACEMENT_DOCUMENT_MAX_BYTES:-10485760}
     # External mode uses host.docker.internal. Docker mode adds the database
     # dependency only through docker-compose.docker-db.yml.
-    depends_on:
-      ollama:
-        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -77,6 +85,7 @@ services:
 
   ollama:
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    profiles: ["local-ai"]
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama

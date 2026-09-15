@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import viteConfig from '../../vite.config.js';
-import { request } from '../services/api';
+import { api, buildChatPayload, request } from '../services/api';
 
 describe('separate Vite/frontend runtime', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -25,5 +25,31 @@ describe('separate Vite/frontend runtime', () => {
     expect(fetch).toHaveBeenCalledWith('/api/student/dashboard', expect.objectContaining({
       headers: { Authorization: 'Bearer token' },
     }));
+  });
+
+  it('always posts the current chat message when optional context cannot serialize', async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ text: 'Overall attendance: 82%' }),
+    });
+    vi.stubGlobal('fetch', fetch);
+    const circular = {};
+    circular.self = circular;
+
+    await api.chat('student-token', 'show me my attendance status', undefined, 'invalid_topic', circular);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toBe('/api/chat');
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ message: 'show me my attendance status' });
+  });
+
+  it('drops malformed optional pairs without changing the required payload', () => {
+    expect(buildChatPayload('show me my attendance status', 'attendance', [
+      { role: 'user', category: 'general_ai', content: 'prior question' },
+      { role: 'assistant', category: 'general_ai', content: 'tampered answer', proof: 'bad' },
+    ])).toEqual({ message: 'show me my attendance status', context_topic: 'attendance' });
   });
 });

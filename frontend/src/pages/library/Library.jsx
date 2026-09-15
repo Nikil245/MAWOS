@@ -4,6 +4,7 @@ import { BookOpen } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { DashboardCard, EmptyState, ErrorState, LoadingSkeleton, PageHeader, StatCard, StatusBadge } from '../../components/ui';
+import { useUserSessionState } from '../../hooks/useUserSessionState';
 
 const date = value => value ? new Date(value).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) + ' IST' : '—';
 const money = value => `₹${Number(value || 0).toFixed(2)}`;
@@ -79,7 +80,20 @@ function BookEditor({ book, save, busy, close }) {
 function Catalogue({ staff = false, onChange }) {
   const [searchParams] = useSearchParams();
   const initialQuery = (searchParams.get('q') || '').slice(0, 128);
-  const [search, setSearch] = useState(initialQuery), [query, setQuery] = useState(initialQuery), [offset, setOffset] = useState(0), [detail, setDetail] = useState(null), [editing, setEditing] = useState(null);
+  const { user } = useAuth();
+  const validView = value => value && typeof value.search === 'string' && value.search.length <= 128
+    && typeof value.query === 'string' && value.query.length <= 128
+    && Number.isInteger(value.offset) && value.offset >= 0 && value.offset <= 100000;
+  const [view, setView] = useUserSessionState(user, `library-catalogue-${staff ? 'staff' : 'student'}`,
+    { search: initialQuery, query: initialQuery, offset: 0 }, { validate: validView });
+  const { search, query, offset } = view;
+  const setSearch = value => setView(current => ({ ...current, search: value }));
+  const setQuery = value => setView(current => ({ ...current, query: value }));
+  const setOffset = value => setView(current => ({ ...current, offset: typeof value === 'function' ? value(current.offset) : value }));
+  useEffect(() => {
+    if (initialQuery) setView({ search: initialQuery, query: initialQuery, offset: 0 });
+  }, [initialQuery]);
+  const [detail, setDetail] = useState(null), [editing, setEditing] = useState(null);
   const state = useLibrary(`/library/books?q=${encodeURIComponent(query)}&offset=${offset}&limit=${PAGE}&include_archived=${staff}`);
   const navigate = useNavigate(); const action = useAction(() => { state.reload(); onChange?.(); });
   const reserve = async id => { const result = await action.run('/student/library/reservations', { book_id: id }); if (result) navigate(`/student/library/slips/${result.id}`); };
@@ -100,7 +114,15 @@ function ReturnRequest({ row, action, close }) {
 }
 
 function StudentRecords({ onChange }) {
-  const [kind, setKind] = useState('reservations'), [offset, setOffset] = useState(0), [returnId, setReturnId] = useState(null);
+  const { user } = useAuth();
+  const validView = value => value && ['reservations', 'issues', 'fines'].includes(value.kind)
+    && Number.isInteger(value.offset) && value.offset >= 0 && value.offset <= 100000;
+  const [view, setView] = useUserSessionState(user, 'student-library-records',
+    { kind: 'reservations', offset: 0 }, { validate: validView });
+  const { kind, offset } = view;
+  const setKind = value => setView(current => ({ ...current, kind: value }));
+  const setOffset = value => setView(current => ({ ...current, offset: typeof value === 'function' ? value(current.offset) : value }));
+  const [returnId, setReturnId] = useState(null);
   const state = useLibrary(`/student/library/${kind}?offset=${offset}&limit=${PAGE}`);
   const action = useAction(() => { state.reload(); onChange(); });
   return <DashboardCard title="My library records"><div className="mb-4 flex flex-wrap gap-2">{[['reservations', 'My reservations'], ['issues', 'Borrowed books & history'], ['fines', 'Fine history']].map(([key, label]) => <button className={kind === key ? 'btn-primary' : 'btn-secondary'} key={key} onClick={() => { setKind(key); setOffset(0); setReturnId(null); }}>{label}</button>)}</div><ActionStatus action={action} />

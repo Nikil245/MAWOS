@@ -15,6 +15,7 @@ criterion and this was its only chat-facing capability.
 """
 import asyncio
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -22,7 +23,9 @@ from typing import Any
 
 import httpx
 
-from . import config
+from . import ai_provider, config
+
+logger = logging.getLogger(__name__)
 
 # fallback intent -> tool name
 INTENT_TOOL = {
@@ -146,7 +149,11 @@ _CHAT_PARAPHRASES: tuple[tuple[str, tuple[str, ...]], ...] = (
         r"\bhow regularly\b.{0,40}\b(?:attend\w*|classes?)\b",
         r"\battend\w*\b.{0,25}\bclasses?\b.{0,15}\bregularly\b",
         r"(?:show|check) (?:me )?(?:my )?attendance",
+        r"what is my attendance", r"attendance status",
         r"how much attendance do i have", r"show attendance please",
+        r"show my attendance status(?: with (?:the )?subject names?)?",
+        r"(?:show )?(?:my )?subject[ -]?wise attendance",
+        r"(?:show )?(?:my )?attendance (?:for|in) each subject",
     )),
     ("fees_query", (
         r"(account|tuition|college) balance", r"amount (i )?(need|have) to pay",
@@ -181,9 +188,17 @@ _PROFILE_PATTERNS = (
 )
 _PERSONAL_CHAT_PATTERNS = (
     ("attendance_query", (
+        r"show me my attendance status", r"what is my attendance",
+        r"show my attendance", r"attendance status",
+        r"show attendance subject wise",
+        r"show my attendance status with subject name",
+        r"attendance for each subject",
         r"(?:can|could|would) you show me my attendance",
         r"(?:could you )?check my attendance", r"how much attendance do i have",
         r"have i attended enough classes", r"show attendance please",
+        r"show my attendance status(?: with (?:the )?subject names?)?",
+        r"(?:show )?(?:my )?subject[ -]?wise attendance",
+        r"(?:show )?(?:my )?attendance (?:for|in) each subject",
     )),
     ("fees_query", (
         r"do i owe anything", r"is (?:there )?any payment pending", r"my fee status",
@@ -278,6 +293,40 @@ class OllamaResult:
     message: dict | None = None
     error_code: str | None = None
     latency_ms: float = 0.0
+    provider: str | None = None
+    model: str | None = None
+
+
+_TIMEOUT_ERRORS = frozenset({"timeout", "deadline_exceeded", "busy"})
+_INVALID_RESPONSE_ERRORS = frozenset({
+    "invalid_json", "response_too_large", "invalid_response", "model_mismatch",
+    "incomplete_response", "truncated_response", "invalid_message",
+    "unexpected_thinking", "invalid_content", "unexpected_markup",
+    "invalid_tool_calls", "mixed_tool_response", "invalid_tool_call",
+    "unknown_tool", "invalid_tool_arguments", "duplicate_tool_calls",
+    "conflicting_tool_calls", "empty_response",
+})
+
+
+def safe_error_category(error_code: str | None) -> str:
+    """Collapse internal failures into categories safe for operational logs."""
+    if error_code in _TIMEOUT_ERRORS:
+        return "timeout"
+    if error_code == "connection_failure":
+        return "connection_failure"
+    if error_code == "model_missing":
+        return "missing_model"
+    if error_code in _INVALID_RESPONSE_ERRORS:
+        return "invalid_response"
+    return "ollama_http_error"
+
+
+def _failed_result(error_code: str, started: float) -> OllamaResult:
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    # Never log the URL, messages, response body, or exception text.
+    logger.warning("Ollama request failed category=%s elapsed_ms=%.1f",
+                   safe_error_category(error_code), elapsed_ms)
+    return OllamaResult(error_code=error_code, latency_ms=elapsed_ms)
 
 
 _health_available: bool | None = None
@@ -289,12 +338,16 @@ _chat_semaphore = asyncio.Semaphore(config.OLLAMA_CONCURRENCY)
 
 def runtime_status() -> dict:
     """Safe runtime metadata; frozen evaluation metadata lives in router.py."""
-    return {
+    status = {
         "runtime_model": config.OLLAMA_MODEL,
         "host": config.OLLAMA_HOST,
         "available": _health_available,
         "health_error": _health_error_code,
     }
+    provider = ai_provider.runtime_status()
+    provider["ollama_available"] = _health_available
+    status["generative_provider"] = provider
+    return status
 
 
 def reset_runtime_state_for_tests() -> None:
@@ -304,6 +357,7 @@ def reset_runtime_state_for_tests() -> None:
     _health_error_code = None
     _health_checked_at = 0.0
     _chat_semaphore = asyncio.Semaphore(config.OLLAMA_CONCURRENCY)
+    ai_provider.reset_runtime_state_for_tests()
 
 
 def _set_health(available: bool, error_code: str | None = None) -> None:
@@ -324,8 +378,8 @@ async def _request_json(method: str, path: str, budget: RequestBudget,
             response = await client.request(method, path, json=payload, timeout=remaining)
     except httpx.TimeoutException:
         return None, None, "timeout"
-    except httpx.HTTPError:
-        return None, None, "unavailable"
+    except httpx.RequestError:
+        return None, None, "connection_failure"
     if len(response.content) > config.OLLAMA_MAX_RESPONSE_CHARS * 4:
         return response.status_code, None, "response_too_large"
     try:
@@ -369,6 +423,9 @@ async def check_ollama_async(budget: RequestBudget | None = None,
             return False
         if status != 200:
             _set_health(False, "unavailable")
+            return False
+        if not isinstance(body, dict) or not isinstance(body.get("models"), list):
+            _set_health(False, "invalid_response")
             return False
         if not _tags_contain_configured_model(body):
             _set_health(False, "model_missing")
@@ -518,24 +575,22 @@ async def chat_async(messages: list[dict], tools: list[dict] | None = None,
     budget = budget or RequestBudget()
     started = time.perf_counter()
     if not await check_ollama_async(budget):
-        return OllamaResult(error_code=_health_error_code or "unavailable",
-                            latency_ms=(time.perf_counter() - started) * 1000)
+        return _failed_result(_health_error_code or "unavailable", started)
     acquired = False
     try:
         remaining = budget.remaining_s()
         if remaining <= 0:
-            return OllamaResult(error_code="deadline_exceeded",
-                                latency_ms=(time.perf_counter() - started) * 1000)
+            return _failed_result("deadline_exceeded", started)
         try:
             await asyncio.wait_for(_chat_semaphore.acquire(), timeout=remaining)
             acquired = True
         except TimeoutError:
-            return OllamaResult(error_code="busy",
-                                latency_ms=(time.perf_counter() - started) * 1000)
+            return _failed_result("busy", started)
         body = {
             "model": config.OLLAMA_MODEL,
             "messages": messages,
             "stream": False,
+            "keep_alive": f"{config.OLLAMA_KEEP_ALIVE_S}s",
             "options": {
                 "temperature": 0.1,
                 "num_ctx": config.OLLAMA_CONTEXT_TOKENS,
@@ -547,14 +602,17 @@ async def chat_async(messages: list[dict], tools: list[dict] | None = None,
         status, payload, error = await _request_json("POST", "/api/chat", budget, body)
         latency = (time.perf_counter() - started) * 1000
         if error:
-            return OllamaResult(error_code=error, latency_ms=latency)
+            return _failed_result(error, started)
         if status == 404:
             _set_health(False, "model_missing")
-            return OllamaResult(error_code="model_missing", latency_ms=latency)
+            return _failed_result("model_missing", started)
         if status != 200:
-            return OllamaResult(error_code="http_error", latency_ms=latency)
+            return _failed_result("http_error", started)
         message, validation_error = _validate_message(payload, _tool_parameters(tools))
-        return OllamaResult(message=message, error_code=validation_error, latency_ms=latency)
+        if validation_error:
+            return _failed_result(validation_error, started)
+        return OllamaResult(message=message, latency_ms=latency,
+                            provider="ollama", model=config.OLLAMA_MODEL)
     finally:
         if acquired:
             _chat_semaphore.release()
@@ -567,6 +625,18 @@ def check_ollama(force: bool = False) -> bool:
     except RuntimeError:
         return asyncio.run(check_ollama_async(force=force))
     return bool(_health_available)
+
+
+async def general_chat_async(messages: list[dict], *, user_key: str,
+                             budget: RequestBudget | None = None) -> OllamaResult:
+    """Run one sanitized tool-free turn through the configured provider layer."""
+    budget = budget or RequestBudget()
+
+    async def local_call():
+        return await chat_async(messages, tools=None, budget=budget)
+
+    return await ai_provider.generate_async(
+        messages, user_key=user_key, ollama_call=local_call)
 
 
 def chat(messages: list[dict], tools: list[dict] | None = None) -> dict | None:
