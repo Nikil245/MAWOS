@@ -192,3 +192,21 @@ For production, use managed or backup-tested PostgreSQL, a strong unique JWT
 secret, TLS at a reverse proxy, pinned images, and external secret management.
 Do not publish PostgreSQL or put secrets in images, Compose files, source
 control, or build arguments.
+# Assistant database security boundary
+
+The Groq provider is an outbound HTTP text-generation service only. It is not
+given `MAWOS_DATABASE_URL`, PostgreSQL credentials, JWTs, passwords, SQL, ORM
+rows, or a database/network tool. FastAPI is the only component that reads
+PostgreSQL, and the assistant uses the fixed read-only allowlist in
+`backend/app/read_only_db.py` after authentication and role/ownership checks.
+
+The Docker Compose files do not publish the PostgreSQL service port. The
+optional database overlay keeps PostgreSQL on the internal `mawos_database`
+network; the backend reaches it through Compose service networking. Do not add
+a public PostgreSQL port or pass database credentials to provider requests.
+
+Database assistant checks are deterministic for attendance, marks, fees,
+profile, hall-ticket eligibility, timetable, placements, library catalogue or
+availability, and campus events. Only the existing library recommendation
+flow may send a bounded catalogue projection to an AI provider, never private
+records or circulation data.

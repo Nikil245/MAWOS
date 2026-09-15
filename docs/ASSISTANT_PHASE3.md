@@ -21,7 +21,7 @@ Sensitive checks take precedence. Exact known explanations precede keyword routi
 
 Conversation and catalog FAQ requests make one bounded tool-free Ollama request to acknowledge an exact `{topic, variant}` pair. The model receives only that reference, not user prose, knowledge prose, or records. The server validates the reference, rejects duplicate/extra fields and tools, and renders the catalog copy. This is constrained acknowledgment, not open-ended model-authored prose. Unavailable or rejected output uses the same checked-in copy with `Safe fallback`. Unknown policies and clarifications do not need Ollama.
 
-Personal records retain the existing two-stage protocol: select one role-filtered read-only tool, authorize and execute it once, then validate a tool-free acknowledgment of the evidence hash. The backend renders the result. A mismatched selected tool is rejected before execution; denial after execution does not trigger a second call. The model never calculates eligibility or personal facts. The research lexicon, thresholds and evaluation artifacts are unchanged; live chat paraphrases and multi-intent detection are separate.
+Legacy personal-record routes retain the existing two-stage protocol: select one role-filtered read-only tool, authorize and execute it once, then validate a tool-free acknowledgment of the evidence hash. The new canonical allowlisted database operations below bypass that provider protocol entirely and render directly from FastAPI-owned DTOs. In both paths, the backend renders the authoritative result; the model never calculates eligibility or personal facts. The research lexicon, thresholds and evaluation artifacts are unchanged; live chat paraphrases and multi-intent detection are separate.
 
 ## Knowledge review scope
 
@@ -95,3 +95,64 @@ Files changed by this phase (other dirty work was preserved):
 - `tests/test_assistant_phase3.py` (new)
 - `frontend/src/test/assistant-phase3.test.jsx` (new)
 - `docs/ASSISTANT_PHASE3.md` (new)
+# Secure database assistant boundary
+
+The assistant's database surface is an explicit read-only allowlist implemented
+in `backend/app/read_only_db.py`. FastAPI owns authentication, role checks,
+ownership checks, SQLAlchemy queries, bounded result limits, response DTOs and
+final formatting. Groq (and the optional local provider) has no PostgreSQL
+connection, database credentials, JWTs, passwords, SQL, unrestricted rows or
+network/database tool.
+
+The supported operations are:
+
+- `get_my_attendance`
+- `get_my_subject_attendance`
+- `get_my_marks`
+- `get_my_fee_status`
+- `get_my_profile`
+- `get_my_hall_ticket_eligibility`
+- `search_library_catalogue`
+- `get_library_book_availability`
+- `get_my_placements`
+- `get_visible_campus_events`
+- `get_my_timetable`
+
+Placement examples include “show my eligible companies”, “which companies am I
+eligible for?”, “show placement drives I can apply for”, “show my placement
+opportunities”, “companies I can apply to”, “available placement drives”,
+“show my shortlisted companies”, and “show my placement status”. Placement and
+company/job eligibility signals take precedence over the generic word
+“available”, so book availability questions continue to use the library path.
+
+These operations are classified and executed deterministically by FastAPI;
+attendance, marks, fees, profile, hall-ticket eligibility, timetable,
+placements, library catalogue/availability and campus events never call Groq.
+Library recommendations remain a separate existing path: only bounded,
+sanitized catalogue fields (`index`, title, author and category) may be sent
+to the provider, and the server validates the selected indices before it
+formats the final answer.
+
+Students are bound to their authenticated student record. Parents may select
+only an actively linked child. Faculty and HOD access remains assignment- or
+department-scoped, while unsupported roles and resources receive a stable safe
+denial. No provider response is trusted for authorization.
+
+`AllowedIntentRequest` and `AllowedIntentResponse` use Pydantic `extra="forbid"`
+schemas. Unknown intents, unsupported parameters, SQL-like text, role changes,
+IDs and unapproved fields are rejected. Query results are bounded and returned
+as sanitized dictionaries without passwords, hashes, tokens, internal IDs,
+model probabilities, audit fields or ORM objects.
+
+The chat log records only the validated intent (or `unclassified`), role,
+response category, success/failure outcome and elapsed time. It does not log
+the prompt, records, identifiers, credentials, URLs or provider payloads.
+
+Run the focused security coverage with:
+
+```bash
+MAWOS_ENV=test MAWOS_DATABASE_MODE=external \
+MAWOS_DATABASE_URL=sqlite:////tmp/mawos-test.db \
+MAWOS_JWT_SECRET=mawos-test-secret-0123456789 \
+.venv/bin/pytest -q tests/test_allowlisted_read_only.py
+```

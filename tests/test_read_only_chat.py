@@ -1,4 +1,4 @@
-"""Phase 1 assistant contract: scoped, authorized, and database-read-only."""
+"your commit message""""Phase 1 assistant contract: scoped, authorized, and database-read-only."""
 import asyncio
 import datetime as dt
 import json
@@ -172,7 +172,7 @@ def test_tampered_context_does_not_block_deterministic_attendance(agents, monkey
     assert response.json()["category"] == "personal_record"
 
 
-def test_chat_request_log_contains_only_safe_context_metadata(caplog):
+def test_chat_request_log_contains_only_safe_routing_metadata(caplog):
     client, headers = _headers("4MT23AI001")
     with caplog.at_level("INFO", logger="backend.app.api.routes"):
         response = client.post(
@@ -182,10 +182,14 @@ def test_chat_request_log_contains_only_safe_context_metadata(caplog):
 
     assert response.status_code == 200
     line = next(record.getMessage() for record in caplog.records
-                if "assistant_request route=/api/chat" in record.getMessage())
-    assert "context_present=False" in line
-    assert "context_status=absent" in line
+                if "assistant_request intent=" in record.getMessage())
+    assert "intent=attendance_query" in line or "intent=get_my_attendance" in line
+    assert "role=student" in line
+    assert "category=personal_record" in line
+    assert "outcome=success" in line
     assert "elapsed_ms=" in line
+    assert "context_present" not in line
+    assert "context_status" not in line
     assert "attendance status" not in line
     assert "4MT23AI001" not in line
 

@@ -171,7 +171,7 @@ class AssistantSuggestionGroupResponse(BaseModel):
 
 class AssistantCapabilitiesResponse(BaseModel):
     """Display-safe assistant scope derived from backend authorization."""
-    role: Literal["student", "faculty", "hod", "principal", "admin"]
+    role: Literal["student", "faculty", "hod", "principal", "admin", "parent", "librarian"]
     title: str
     subtitle: str
     description: str

@@ -48,6 +48,7 @@ from .schemas import (
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
 EXISTING_PORTAL_ROLES = ("student", "faculty", "hod", "principal", "admin")
+CHAT_PORTAL_ROLES = EXISTING_PORTAL_ROLES + ("parent", "librarian")
 ASSISTANT_CONTEXT_TTL_SECONDS = 12 * 60 * 60
 
 
@@ -176,7 +177,7 @@ def mark_all_notifications_read(user: User = Depends(get_current_user), db: Sess
 
 # ---------- assistant ---------------------------------------------------------
 @router.get("/assistant/capabilities", response_model=AssistantCapabilitiesResponse)
-def assistant_capabilities(user: User = Depends(require_role(*EXISTING_PORTAL_ROLES))):
+def assistant_capabilities(user: User = Depends(require_role(*CHAT_PORTAL_ROLES))):
     result = assistant_tools.assistant_capabilities(user.role, user.display_name)
     provider = ai_provider.runtime_status()
     ollama_available = llm.runtime_status()["available"] is True
@@ -314,9 +315,10 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(body: ChatRequest, user: User = Depends(require_role(*EXISTING_PORTAL_ROLES)),
+async def chat(body: ChatRequest, user: User = Depends(require_role(*CHAT_PORTAL_ROLES)),
                db: Session = Depends(get_session)):
     started = time.perf_counter()
+    result = None
     context, context_status = _owned_context(user, body.conversation_context)
     topic = body.context_topic if body.context_topic in ChatTopic.__args__ else None
     if body.context_topic is not None and topic is None and context_status == "absent":
@@ -340,8 +342,10 @@ async def chat(body: ChatRequest, user: User = Depends(require_role(*EXISTING_PO
         return result
     finally:
         logger.info(
-            "assistant_request route=/api/chat context_present=%s context_status=%s elapsed_ms=%.1f",
-            body.conversation_context not in (None, []), context_status,
+            "assistant_request intent=%s role=%s category=%s outcome=%s elapsed_ms=%.1f",
+            (result or {}).get("intent", "unclassified"), user.role,
+            (result or {}).get("category", "error"),
+            "failure" if not result or result.get("fallback") else "success",
             (time.perf_counter() - started) * 1000,
         )
 

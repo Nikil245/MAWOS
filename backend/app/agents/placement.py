@@ -59,6 +59,9 @@ class PlacementAgent(BaseAgent):
             entry = self.service.eligibility(db, drive.id, usn)
             result.append(dict(company=drive.company, role=drive.role, package_lpa=drive.package_lpa,
                                date=str(drive.drive_date), departments=drive.departments,
+                               application_deadline=(str(drive.application_deadline)
+                                                     if drive.application_deadline else None),
+                               application_url=drive.application_url,
                                eligible=bool(entry['eligible']), probability=entry['ml_probability'],
                                reasons=entry['reasons'], status=entry['status']))
         return result

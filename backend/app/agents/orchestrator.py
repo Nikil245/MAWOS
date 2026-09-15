@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from .. import assistant_routing as conversational
 from .. import config, llm, provenance, router
 from ..library import assistant as library_assistant
+from .. import read_only_db
 from . import tools as toolreg
 from .base import BaseAgent
 
@@ -130,6 +131,55 @@ class OrchestratorAgent(BaseAgent):
     def __init__(self, bus, agents: dict):
         super().__init__(bus)
         self.agents = agents
+
+    def _handle_allowlisted_read(self, db, user, request: read_only_db.AllowedIntentRequest) -> dict:
+        """Execute the canonical database allowlist without a provider call."""
+        started = time.perf_counter()
+        try:
+            result = read_only_db.execute(db, self.agents, user, request)
+        except Exception:
+            # Provider-shaped errors and ORM details never leave this boundary.
+            if request.intent is read_only_db.AllowedIntent.get_my_placements:
+                response = self._scope_response(
+                    user, llm.IntentResult("placement_query", "keyword", 0.0,
+                                           tool="get_placements"))
+                response.update(category="unsupported", source_label="Safe fallback")
+                return response
+            result = {"error": "That record is not available through the read-only assistant. "
+                              "You may ask about your own attendance or other authorized records."}
+        intent = request.intent.value
+        denied = "error" in result
+        public_tool_name = {
+            "get_my_attendance": "get_attendance",
+            "get_my_subject_attendance": "get_attendance",
+            "get_my_marks": "get_marks",
+            "get_my_fee_status": "get_fees",
+            "get_my_hall_ticket_eligibility": "get_hall_ticket",
+        }.get(intent, intent)
+        return {
+            "text": read_only_db.format_result(request.intent, result),
+            "category": ("unsupported" if denied and intent in {
+                "search_library_catalogue", "get_library_book_availability"}
+                else "sensitive_or_disallowed" if denied else "personal_record"),
+            "source_label": "Safe fallback" if denied else "Deterministic answer",
+            "mode": "scope" if denied else "lexicon",
+            "intent": intent,
+            "tools_used": [] if denied else [{"name": public_tool_name, "args": {},
+                                               "ms": round((time.perf_counter() - started) * 1000, 1)}],
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+            "data": result,
+            "fallback": denied,
+            "fallback_code": "read_only_denied" if denied else None,
+            "actions": [],
+            "context_books": [],
+            "routing": {
+                "tier": "scope" if denied else "lexicon", "margin": 1.0,
+                "tau": router.TAU, "escalated": False, "attempted_llm": False,
+                "accepted_llm": False, "deterministic_fallback": False,
+                "reason": "read-only allowlisted database operation",
+                "fallback_from": None,
+            },
+        }
 
     @staticmethod
     def _department_summary_response(db, user, message: str, agents: dict) -> dict | None:
@@ -509,6 +559,16 @@ class OrchestratorAgent(BaseAgent):
                 capability["description"] + " I cannot change records, bypass permissions, "
                 "process credentials, or provide professional or emergency advice.",
                 source="Safe fallback")
+        # All database-related intents are selected and executed locally. The
+        # provider is intentionally not consulted, even when it is healthy.
+        allowlisted = read_only_db.classify_deterministic(message)
+        legacy_record = allowlisted is not None and allowlisted.intent.value in {
+            "get_my_attendance", "get_my_subject_attendance", "get_my_marks",
+            "get_my_fee_status", "get_my_profile", "get_my_hall_ticket_eligibility",
+        }
+        new_record = allowlisted is not None and not legacy_record
+        if allowlisted is not None and (user.role in {"parent", "librarian"} or new_record):
+            return self._handle_allowlisted_read(db, user, allowlisted)
         library_request = library_assistant.detect_library_request(
             message, has_context=bool(conversation_context))
         if library_request is not None:
