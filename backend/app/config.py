@@ -22,6 +22,10 @@ ENVIRONMENTS = frozenset({"development", "test", "production"})
 DATABASE_MODES = frozenset({"external", "docker"})
 AI_PROVIDERS = frozenset({"auto", "groq", "ollama", "disabled"})
 MIN_JWT_SECRET_BYTES = 32
+DEVELOPMENT_CORS_ORIGINS = (
+    "http://localhost:3000", "http://127.0.0.1:3000",
+    "http://localhost:5173", "http://127.0.0.1:5173",
+)
 
 # This fallback is deliberately limited to non-production modes. It is
 # convenient for local development, but is public source code and unsafe for
@@ -152,6 +156,38 @@ def validate_security_configuration() -> None:
     """Validate all security-sensitive startup settings without exposing secrets."""
     jwt_secret()
     seed_demo_data_enabled()
+    cors_origins()
+
+
+def cors_origins() -> tuple[str, ...]:
+    """Return strict browser origins allowed to call the API.
+
+    Bearer authentication does not use browser cookies, so CORS credentials
+    remain disabled.  Wildcards are deliberately unsupported in every mode.
+    """
+    raw = os.getenv("MAWOS_CORS_ORIGINS", "").strip()
+    if not raw:
+        if environment_mode() == "production":
+            raise ConfigurationError(
+                "MAWOS_CORS_ORIGINS must list explicit HTTPS frontend origins in production"
+            )
+        return DEVELOPMENT_CORS_ORIGINS
+    origins = tuple(item.strip().rstrip("/") for item in raw.split(",") if item.strip())
+    if not origins:
+        raise ConfigurationError("MAWOS_CORS_ORIGINS must contain at least one origin")
+    if len(origins) != len(set(origins)):
+        raise ConfigurationError("MAWOS_CORS_ORIGINS must not contain duplicate origins")
+    for origin in origins:
+        parsed = urlsplit(origin)
+        if (origin == "*" or parsed.scheme not in {"http", "https"}
+                or not parsed.hostname or parsed.username or parsed.password
+                or parsed.path or parsed.query or parsed.fragment):
+            raise ConfigurationError(
+                "MAWOS_CORS_ORIGINS entries must be origins such as https://frontend.example"
+            )
+        if environment_mode() == "production" and parsed.scheme != "https":
+            raise ConfigurationError("MAWOS_CORS_ORIGINS must use HTTPS in production")
+    return origins
 
 
 def database_url() -> str:

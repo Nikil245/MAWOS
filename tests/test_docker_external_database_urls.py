@@ -108,3 +108,15 @@ def test_groq_key_is_forwarded_only_to_backend_runtime():
     assert config["services"]["backend"]["environment"]["GROQ_API_KEY"] == marker
     assert marker not in json.dumps(config["services"]["frontend"])
     assert "GROQ_API_KEY" not in config["services"]["frontend"].get("build", {}).get("args", {})
+
+
+def test_runtime_ports_keep_local_defaults_and_allow_render_overrides():
+    rendered = _compose(_external_environment(), "--format", "json")
+    assert rendered.returncode == 0, rendered.stderr
+    config = json.loads(rendered.stdout)
+    assert config["services"]["backend"]["ports"] == [{"mode": "ingress", "target": 8000, "published": "8000", "protocol": "tcp"}]
+    assert config["services"]["frontend"]["ports"] == [{"mode": "ingress", "target": 8080, "published": "3000", "protocol": "tcp"}]
+    assert 'PORT=8000' in (ROOT / "backend/Dockerfile").read_text()
+    assert '${PORT:-8000}' in (ROOT / "backend/Dockerfile").read_text()
+    assert 'ENV PORT=8080' in (ROOT / "frontend/Dockerfile").read_text()
+    assert '${PORT}' in (ROOT / "frontend/nginx.conf").read_text()

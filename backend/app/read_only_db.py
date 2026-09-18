@@ -12,8 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy import select
 
 from .campus_events import audience_roles, india_today, visible_to
-from .models import (AttendanceRecord, AttendanceSummary, CampusEvent, Faculty,
-                     Parent, ParentStudent, Student,
+from .models import (AttendanceRecord, AttendanceSummary, CampusEvent, Department,
+                     Faculty, MarksRecord, Parent, ParentStudent, Student,
                      Subject, TeachingAssignment, User)
 from .timetable import reads as timetable_reads
 
@@ -28,8 +28,33 @@ class AllowedIntent(str, Enum):
     search_library_catalogue = "search_library_catalogue"
     get_library_book_availability = "get_library_book_availability"
     get_my_placements = "get_my_placements"
+    get_my_scholarship_status = "get_my_scholarship_status"
+    get_my_notifications = "get_my_notifications"
     get_visible_campus_events = "get_visible_campus_events"
     get_my_timetable = "get_my_timetable"
+    get_department_overview = "get_department_overview"
+    get_department_student_count = "get_department_student_count"
+    get_department_faculty_count = "get_department_faculty_count"
+    get_department_average_attendance = "get_department_average_attendance"
+    get_department_attendance_by_semester = "get_department_attendance_by_semester"
+    get_department_attendance_risk_summary = "get_department_attendance_risk_summary"
+    get_department_marks_summary = "get_department_marks_summary"
+    get_institution_overview = "get_institution_overview"
+
+
+class AnalyticsGroupBy(str, Enum):
+    semester = "semester"
+    section = "section"
+    subject = "subject"
+
+
+class AnalyticsMetric(str, Enum):
+    overview = "overview"
+    student_count = "student_count"
+    faculty_count = "faculty_count"
+    attendance = "attendance"
+    attendance_risk = "attendance_risk"
+    marks = "marks"
 
 
 _SQLISH = re.compile(
@@ -54,6 +79,11 @@ class AllowedIntentParameters(BaseModel):
     child_usn: str | None = Field(default=None, max_length=16)
     student_usn: str | None = Field(default=None, max_length=16)
     limit: int = Field(default=20, ge=1, le=50)
+    department_code: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9]{1,7}$")
+    academic_year: int | None = Field(default=None, ge=1, le=4)
+    semester: int | None = Field(default=None, ge=1, le=8)
+    group_by: AnalyticsGroupBy | None = None
+    metric: AnalyticsMetric | None = None
 
     @field_validator("subject", "query", "child_usn", "student_usn")
     @classmethod
@@ -69,6 +99,13 @@ class AllowedIntentParameters(BaseModel):
     @classmethod
     def normalized_identity(cls, value):
         return value.upper() if value else value
+
+    @model_validator(mode="after")
+    def semester_matches_academic_year(self):
+        if (self.academic_year is not None and self.semester is not None
+                and self.semester not in academic_year_semesters(self.academic_year)):
+            raise ValueError("semester is outside the requested academic year")
+        return self
 
 
 class AllowedIntentRequest(BaseModel):
@@ -89,8 +126,24 @@ class AllowedIntentRequest(BaseModel):
             AllowedIntent.search_library_catalogue: {"query", "limit"},
             AllowedIntent.get_library_book_availability: {"query", "limit"},
             AllowedIntent.get_my_placements: {"student_usn", "child_usn"},
+            AllowedIntent.get_my_scholarship_status: {"student_usn", "child_usn"},
+            AllowedIntent.get_my_notifications: {"limit"},
             AllowedIntent.get_visible_campus_events: {"limit"},
             AllowedIntent.get_my_timetable: {"student_usn", "child_usn"},
+            AllowedIntent.get_department_overview: {
+                "department_code", "academic_year", "semester", "group_by", "metric"},
+            AllowedIntent.get_department_student_count: {
+                "department_code", "academic_year", "semester", "metric"},
+            AllowedIntent.get_department_faculty_count: {"department_code", "metric"},
+            AllowedIntent.get_department_average_attendance: {
+                "department_code", "academic_year", "semester", "group_by", "metric"},
+            AllowedIntent.get_department_attendance_by_semester: {
+                "department_code", "academic_year", "semester", "group_by", "metric"},
+            AllowedIntent.get_department_attendance_risk_summary: {
+                "department_code", "academic_year", "semester", "group_by", "metric"},
+            AllowedIntent.get_department_marks_summary: {
+                "department_code", "academic_year", "semester", "group_by", "metric"},
+            AllowedIntent.get_institution_overview: {"group_by", "metric"},
         }[self.intent]
         supplied = self.parameters.model_dump(exclude_none=True, exclude_defaults=True)
         if any(name not in allowed for name in supplied):
@@ -114,26 +167,130 @@ def validate_provider_intent(payload: str | bytes | dict) -> AllowedIntentRespon
 
 _INTENT_PATTERNS: tuple[tuple[AllowedIntent, tuple[str, ...]], ...] = (
     (AllowedIntent.get_my_subject_attendance, (r"subject.?wise attendance", r"attendance (?:for|in) each subject", r"attendance in .+")),
-    (AllowedIntent.get_my_attendance, (r"my attendance", r"attendance status", r"attendance percentage", r"how much attendance")),
-    (AllowedIntent.get_my_marks, (r"my (?:internal )?marks", r"cie marks", r"marks did i get", r"internals?")),
-    (AllowedIntent.get_my_fee_status, (r"my fees?", r"fee status", r"fees? (?:do|i) owe", r"payment pending")),
+    (AllowedIntent.get_my_attendance, (r"(?:my|my child'?s) attendance", r"attendance status", r"attendance percentage", r"how much attendance")),
+    (AllowedIntent.get_my_marks, (r"(?:my|my child'?s) (?:internal )?marks", r"cie marks", r"marks did i get", r"internals?")),
+    (AllowedIntent.get_my_fee_status, (r"(?:my|my child'?s) fees?", r"fee status", r"fees? (?:do|i) owe", r"payment pending")),
     (AllowedIntent.get_my_profile, (r"my profile", r"my details", r"my name", r"my role", r"my faculty.?id")),
     (AllowedIntent.get_my_hall_ticket_eligibility, (r"hall.?ticket", r"eligible.*exam", r"write.*exam")),
-    (AllowedIntent.get_my_timetable, (r"my timetable", r"my time table", r"my class schedule", r"what classes")),
+    (AllowedIntent.get_my_timetable, (r"(?:my|my child'?s) timetable", r"(?:my|my child'?s) time table", r"(?:my|my child'?s) class schedule", r"what classes")),
     # Placement must precede every library availability pattern.  ``available``
     # is intentionally not sufficient by itself: it becomes placement only
     # when paired with a placement/company/job/eligibility action signal.
     (AllowedIntent.get_my_placements, (
-        r"my placements?", r"placement drives?", r"placement companies?",
+        r"(?:my|my child'?s) placements?", r"placement drives?", r"placement companies?",
         r"(?:eligible|eligibility|available)\b.{0,40}\b(?:companies?|placements?|drives?|jobs?|opportunities?)",
         r"\b(?:companies?|placements?|drives?|jobs?|opportunities?)\b.{0,40}\b(?:eligible|eligibility|available|apply|shortlisted|offer|recruiter)",
         r"available for me", r"can apply", r"apply to", r"shortlisted companies?",
         r"placement status", r"recruiters?",
     )),
+    (AllowedIntent.get_my_scholarship_status, (
+        r"(?:my|my child'?s) scholarship", r"scholarship status", r"eligible.{0,30}scholarship",
+        r"scholarship.{0,30}eligible", r"financial aid status",
+    )),
+    (AllowedIntent.get_my_notifications, (
+        r"my notifications?", r"show notifications?", r"my alerts?",
+        r"what did i miss", r"recent notifications?",
+    )),
     (AllowedIntent.get_visible_campus_events, (r"campus events?", r"college events?", r"upcoming events?")),
     (AllowedIntent.search_library_catalogue, (r"search.*library", r"find .*books?", r"library catalogue", r"books? (?:about|by)")),
     (AllowedIntent.get_library_book_availability, (r"book.*available", r"availability.*book", r"available.*book")),
 )
+
+
+_DEPARTMENT_ANALYTICS_INTENTS = frozenset({
+    AllowedIntent.get_department_overview,
+    AllowedIntent.get_department_student_count,
+    AllowedIntent.get_department_faculty_count,
+    AllowedIntent.get_department_average_attendance,
+    AllowedIntent.get_department_attendance_by_semester,
+    AllowedIntent.get_department_attendance_risk_summary,
+    AllowedIntent.get_department_marks_summary,
+})
+
+
+def is_analytics_intent(intent: AllowedIntent) -> bool:
+    return intent in _DEPARTMENT_ANALYTICS_INTENTS or intent is AllowedIntent.get_institution_overview
+
+
+def academic_year_semesters(academic_year: int) -> tuple[int, int]:
+    """Return the project's canonical two-semester academic-year mapping."""
+    if academic_year not in {1, 2, 3, 4}:
+        raise ValueError("academic year must be from 1 to 4")
+    return academic_year * 2 - 1, academic_year * 2
+
+
+def _analytics_parameters(message: str, intent: AllowedIntent) -> dict:
+    text = " ".join(message.casefold().replace("-", " ").split())
+    params: dict = {}
+    year_words = {"first": 1, "1st": 1, "second": 2, "2nd": 2,
+                  "third": 3, "3rd": 3, "fourth": 4, "4th": 4}
+    for word, number in year_words.items():
+        if re.search(rf"\b{word}\s+(?:academic\s+)?year\b", text):
+            params["academic_year"] = number
+            break
+    semester = re.search(r"\b(?:semester|sem)\s*([1-8])\b|\b([1-8])(?:st|nd|rd|th)\s+semester\b", text)
+    if semester:
+        value = int(semester.group(1) or semester.group(2))
+        params["semester"] = value
+        params.setdefault("academic_year", (value + 1) // 2)
+    group = re.search(r"\bby\s+(semester|section|subject)\b|\bsubject[ -]?wise\b", text)
+    if group:
+        params["group_by"] = group.group(1) or "subject"
+    elif intent in {AllowedIntent.get_department_attendance_by_semester,
+                    AllowedIntent.get_department_attendance_risk_summary}:
+        params["group_by"] = "semester"
+    elif (intent == AllowedIntent.get_department_average_attendance
+          and params.get("academic_year") is not None):
+        params["group_by"] = "semester"
+    metric = {
+        AllowedIntent.get_department_overview: "overview",
+        AllowedIntent.get_department_student_count: "student_count",
+        AllowedIntent.get_department_faculty_count: "faculty_count",
+        AllowedIntent.get_department_average_attendance: "attendance",
+        AllowedIntent.get_department_attendance_by_semester: "attendance",
+        AllowedIntent.get_department_attendance_risk_summary: "attendance_risk",
+        AllowedIntent.get_department_marks_summary: "marks",
+        AllowedIntent.get_institution_overview: "overview",
+    }[intent]
+    params["metric"] = metric
+    # Department text is an untrusted selector. It is retained only as a
+    # validated value; authorization later replaces it with the HOD's scope.
+    code = re.search(r"\b([A-Z][A-Z0-9]{1,7})\b", message)
+    if code and code.group(1) not in {"HOD", "MAWOS"}:
+        params["department_code"] = code.group(1)
+    return params
+
+
+def _classify_analytics(message: str) -> AllowedIntentRequest | None:
+    text = " ".join(message.casefold().replace("-", " ").split())
+    if re.search(r"\b(?:what does|what is|explain|define|definition)\b.{0,40}\b(?:mean|meaning|shortage)\b", text):
+        return None
+    # Preserve the established combined student-and-faculty summary contract;
+    # the dedicated deterministic route handles that exact legacy phrasing.
+    if re.search(r"\bstudents?\b", text) and re.search(r"\b(?:faculty|teachers?)\b", text):
+        return None
+    institution = bool(re.search(
+        r"\b(?:institution|institution wide|college wide|whole college)\b.{0,35}\b(?:overview|statistics|summary|analytics)\b"
+        r"|\b(?:overview|statistics|summary|analytics)\b.{0,35}\b(?:institution|institution wide|college wide|whole college)\b", text))
+    if institution:
+        intent = AllowedIntent.get_institution_overview
+    elif re.search(r"\b(?:how many|number of|count)\b.{0,30}\bstudents?\b|\bstudent count\b", text):
+        intent = AllowedIntent.get_department_student_count
+    elif re.search(r"\b(?:how many|number of|count)\b.{0,30}\b(?:faculty|teachers?)\b|\bfaculty count\b", text):
+        intent = AllowedIntent.get_department_faculty_count
+    elif re.search(r"\battendance risk\b|\b(?:below|under)\s*75\s*%?\b|\bshortage(?: students?)?\b", text):
+        intent = AllowedIntent.get_department_attendance_risk_summary
+    elif re.search(r"\battendance\b.{0,30}\bby semester\b|\bby semester\b.{0,30}\battendance\b", text):
+        intent = AllowedIntent.get_department_attendance_by_semester
+    elif re.search(r"\b(?:average|avg|mean)\s+attendance\b|\bdepartment attendance(?: summary)?\b|\b(?:first|second|third|fourth|1st|2nd|3rd|4th)\s+year attendance\b", text):
+        intent = AllowedIntent.get_department_average_attendance
+    elif re.search(r"\b(?:average|avg|mean)\s+(?:internal )?marks\b|\bdepartment marks(?: summary)?\b|\bacademic marks summary\b", text):
+        intent = AllowedIntent.get_department_marks_summary
+    elif re.search(r"\bdepartment (?:overview|statistics|stats|academic summary)\b|\bacademic summary\b", text):
+        intent = AllowedIntent.get_department_overview
+    else:
+        return None
+    return AllowedIntentRequest(intent=intent, parameters=_analytics_parameters(message, intent))
 
 
 def classify_deterministic(message: str) -> AllowedIntentRequest | None:
@@ -145,6 +302,9 @@ def classify_deterministic(message: str) -> AllowedIntentRequest | None:
     # which may send only its sanitized catalogue projection to the provider.
     if re.search(r"\brecommend\w*\b", text):
         return None
+    analytics = _classify_analytics(message)
+    if analytics is not None:
+        return analytics
     intent = next((name for name, patterns in _INTENT_PATTERNS
                    if any(re.search(pattern, text) for pattern in patterns)), None)
     if intent is None:
@@ -273,12 +433,212 @@ def _clean_timetable(db, user, student) -> dict:
     return data
 
 
+def _department_scope(user, request: AllowedIntentRequest) -> str | None:
+    """Bind department analytics to authority, never to question text."""
+    if request.intent not in _DEPARTMENT_ANALYTICS_INTENTS or user.role != "hod":
+        return None
+    code = (user.dept_code or "").strip().upper()
+    requested = (request.parameters.department_code or "").strip().upper()
+    # An explicit foreign selector is denied rather than silently reinterpreted.
+    # Either behavior would prevent expansion, but denial keeps the boundary
+    # visible and preserves the established department-summary policy.
+    if requested and requested != code:
+        return None
+    return code or None
+
+
+def _student_filters(department_code: str, params: AllowedIntentParameters):
+    filters = [Student.dept_code == department_code]
+    if params.academic_year is not None:
+        semesters = academic_year_semesters(params.academic_year)
+        filters.extend((Student.year == params.academic_year,
+                        Student.semester.in_(semesters)))
+    if params.semester is not None:
+        filters.append(Student.semester == params.semester)
+    return filters
+
+
+def _department_identity(db, department_code: str) -> tuple[str, str]:
+    row = db.execute(select(Department.code, Department.name).where(
+        Department.code == department_code)).one_or_none()
+    return (row[0], row[1]) if row else (department_code, department_code)
+
+
+def _student_count(db, department_code: str, params: AllowedIntentParameters) -> int:
+    return len(db.scalars(select(Student.usn).where(
+        *_student_filters(department_code, params))).all())
+
+
+def _attendance_analytics(db, department_code: str,
+                          params: AllowedIntentParameters) -> dict:
+    filters = _student_filters(department_code, params)
+    subject_semesters = None
+    if params.semester is not None:
+        subject_semesters = (params.semester,)
+    elif params.academic_year is not None:
+        subject_semesters = academic_year_semesters(params.academic_year)
+    if subject_semesters:
+        filters.append(Subject.semester.in_(subject_semesters))
+    rows = db.execute(select(
+        AttendanceSummary.usn, AttendanceSummary.classes_attended,
+        AttendanceSummary.classes_held, Student.semester, Student.section,
+        Subject.code, Subject.name, Subject.semester,
+    ).join(Student, Student.usn == AttendanceSummary.usn).join(
+        Subject, Subject.code == AttendanceSummary.subject_code
+    ).where(*filters).order_by(Subject.semester, Subject.code)).all()
+
+    def percentage(attended: int, held: int) -> float:
+        return round(100.0 * attended / held, 1) if held else 0.0
+
+    students: dict[str, list[int]] = {}
+    for row in rows:
+        totals = students.setdefault(row.usn, [0, 0])
+        totals[0] += int(row.classes_attended or 0)
+        totals[1] += int(row.classes_held or 0)
+    included = sum(total[1] > 0 for total in students.values())
+    below = sum(total[1] > 0 and percentage(*total) < 75 for total in students.values())
+    attended = sum(total[0] for total in students.values())
+    held = sum(total[1] for total in students.values())
+
+    group_by = params.group_by
+    grouped: dict[tuple, dict[str, list[int]]] = {}
+    labels: dict[tuple, dict] = {}
+    if group_by:
+        for row in rows:
+            if group_by is AnalyticsGroupBy.semester:
+                key, label = (int(row[7]),), {"semester": int(row[7])}
+            elif group_by is AnalyticsGroupBy.section:
+                key, label = (str(row.section),), {"section": str(row.section)}
+            else:
+                key = (str(row.code),)
+                label = {"subject_code": str(row.code), "subject": str(row.name)}
+            labels[key] = label
+            totals = grouped.setdefault(key, {}).setdefault(row.usn, [0, 0])
+            totals[0] += int(row.classes_attended or 0)
+            totals[1] += int(row.classes_held or 0)
+    output_rows = []
+    for key in sorted(grouped):
+        per_student = grouped[key]
+        group_attended = sum(value[0] for value in per_student.values())
+        group_held = sum(value[1] for value in per_student.values())
+        output_rows.append({**labels[key],
+            "students_included": sum(value[1] > 0 for value in per_student.values()),
+            "average_attendance": percentage(group_attended, group_held),
+            "students_below_75": sum(value[1] > 0 and percentage(*value) < 75
+                                     for value in per_student.values())})
+    return {"students_included": included,
+            "average_attendance": percentage(attended, held),
+            "students_below_75": below, "rows": output_rows}
+
+
+def _marks_analytics(db, department_code: str,
+                     params: AllowedIntentParameters) -> dict:
+    filters = _student_filters(department_code, params)
+    subject_semesters = None
+    if params.semester is not None:
+        subject_semesters = (params.semester,)
+    elif params.academic_year is not None:
+        subject_semesters = academic_year_semesters(params.academic_year)
+    if subject_semesters:
+        filters.append(Subject.semester.in_(subject_semesters))
+    rows = db.execute(select(
+        MarksRecord.usn, MarksRecord.marks, MarksRecord.max_marks,
+        Student.semester, Student.section, Subject.code, Subject.name, Subject.semester,
+    ).join(Student, Student.usn == MarksRecord.usn).join(
+        Subject, Subject.code == MarksRecord.subject_code
+    ).where(*filters).order_by(Subject.semester, Subject.code)).all()
+    valid = [row for row in rows if float(row.max_marks or 0) > 0]
+    average = round(100.0 * sum(float(row.marks) for row in valid)
+                    / sum(float(row.max_marks) for row in valid), 1) if valid else 0.0
+    group_by = params.group_by or AnalyticsGroupBy.semester
+    grouped: dict[tuple, list] = {}
+    labels: dict[tuple, dict] = {}
+    for row in valid:
+        if group_by is AnalyticsGroupBy.section:
+            key, label = (str(row.section),), {"section": str(row.section)}
+        elif group_by is AnalyticsGroupBy.subject:
+            key, label = (str(row.code),), {"subject_code": str(row.code), "subject": str(row.name)}
+        else:
+            key, label = (int(row[7]),), {"semester": int(row[7])}
+        labels[key] = label
+        grouped.setdefault(key, []).append(row)
+    output_rows = []
+    for key in sorted(grouped):
+        values = grouped[key]
+        possible = sum(float(row.max_marks) for row in values)
+        output_rows.append({**labels[key],
+            "students_included": len({row.usn for row in values}),
+            "average_marks": round(100.0 * sum(float(row.marks) for row in values) / possible, 1)})
+    return {"students_included": len({row.usn for row in valid}),
+            "average_marks": average, "rows": output_rows}
+
+
+def _department_analytics(db, department_code: str, intent: AllowedIntent,
+                          params: AllowedIntentParameters) -> dict:
+    code, name = _department_identity(db, department_code)
+    base = {"analytics_kind": intent.value, "department_code": code,
+            "department_name": name, "academic_year": params.academic_year,
+            "semester": params.semester,
+            "semesters": list(academic_year_semesters(params.academic_year))
+                         if params.academic_year else ([params.semester] if params.semester else [])}
+    if intent == AllowedIntent.get_department_faculty_count:
+        base["faculty_count"] = len(db.scalars(select(Faculty.id).where(
+            Faculty.dept_code == code)).all())
+        return base
+    base["student_count"] = _student_count(db, code, params)
+    if intent == AllowedIntent.get_department_student_count:
+        return base
+    attendance = _attendance_analytics(db, code, params)
+    if intent in {AllowedIntent.get_department_average_attendance,
+                  AllowedIntent.get_department_attendance_by_semester,
+                  AllowedIntent.get_department_attendance_risk_summary}:
+        return {**base, **attendance}
+    if intent == AllowedIntent.get_department_marks_summary:
+        return {**base, **_marks_analytics(db, code, params)}
+    base["faculty_count"] = len(db.scalars(select(Faculty.id).where(
+        Faculty.dept_code == code)).all())
+    base.update(attendance)
+    marks = _marks_analytics(db, code, params)
+    base["average_marks"] = marks["average_marks"]
+    base["marks_students_included"] = marks["students_included"]
+    return base
+
+
+def _institution_overview(db) -> dict:
+    rows = []
+    empty_params = AllowedIntentParameters(group_by=AnalyticsGroupBy.semester,
+                                           metric=AnalyticsMetric.overview)
+    for code, name in db.execute(select(Department.code, Department.name).order_by(
+            Department.code)).all():
+        attendance = _attendance_analytics(db, code, empty_params)
+        rows.append({"department_code": code, "department_name": name,
+                     "student_count": _student_count(db, code, empty_params),
+                     "faculty_count": len(db.scalars(select(Faculty.id).where(
+                         Faculty.dept_code == code)).all()),
+                     "average_attendance": attendance["average_attendance"],
+                     "students_below_75": attendance["students_below_75"]})
+    return {"analytics_kind": AllowedIntent.get_institution_overview.value,
+            "department_count": len(rows),
+            "student_count": sum(row["student_count"] for row in rows),
+            "faculty_count": sum(row["faculty_count"] for row in rows),
+            "rows": rows}
+
+
 def execute(db, agents, user, request: AllowedIntentRequest) -> dict:
     """Execute one fixed, bounded, read-only operation."""
     intent = request.intent
     params = request.parameters
     if user.role not in {"student", "faculty", "hod", "principal", "admin", "parent", "librarian"}:
         return _safe_denial()
+    if request.intent in _DEPARTMENT_ANALYTICS_INTENTS:
+        department_code = _department_scope(user, request)
+        if department_code is None:
+            return _safe_denial()
+        return _department_analytics(db, department_code, request.intent, params)
+    if request.intent == AllowedIntent.get_institution_overview:
+        if user.role not in {"admin", "principal"}:
+            return _safe_denial()
+        return _institution_overview(db)
     if intent in {AllowedIntent.search_library_catalogue, AllowedIntent.get_library_book_availability}:
         # Preserve the existing assistant policy: catalogue chat is student
         # scoped. Librarians retain their existing catalogue REST workflow.
@@ -288,7 +648,10 @@ def execute(db, agents, user, request: AllowedIntentRequest) -> dict:
         return _clean_profile(db, user)
     if intent in {AllowedIntent.get_my_attendance, AllowedIntent.get_my_subject_attendance,
                   AllowedIntent.get_my_marks, AllowedIntent.get_my_fee_status,
-                  AllowedIntent.get_my_hall_ticket_eligibility, AllowedIntent.get_my_placements}:
+                  AllowedIntent.get_my_hall_ticket_eligibility, AllowedIntent.get_my_placements,
+                  AllowedIntent.get_my_scholarship_status}:
+        if intent == AllowedIntent.get_my_scholarship_status and user.role not in {"student", "parent"}:
+            return _safe_denial()
         student, denied = _student_or_denied(db, user, params)
         if denied:
             return denied
@@ -334,6 +697,18 @@ def execute(db, agents, user, request: AllowedIntentRequest) -> dict:
         if intent == AllowedIntent.get_my_hall_ticket_eligibility:
             result = agents["eligibility_agent"].hall_ticket_status(db, student.usn)
             return {"eligible": bool(result["eligible"]), "reasons": list(result["reasons"])[:10]}
+        if intent == AllowedIntent.get_my_scholarship_status:
+            from . import scholarships
+            result = scholarships.student_summary(db, student)
+            opportunity = result.get("opportunity")
+            return {
+                "state": result.get("state"),
+                "eligible_count": result.get("eligible_count", 0),
+                "total_available": result.get("total_available", 0),
+                "opportunity": ({key: opportunity.get(key) for key in
+                                 ("name", "status", "closes_at", "eligibility_status", "applied")}
+                                if isinstance(opportunity, dict) else None),
+            }
         drives = agents["placement_agent"].student_view(db, student.usn)
         return {"drives": [{key: drive[key] for key in
                             ("company", "role", "package_lpa", "date", "departments",
@@ -352,6 +727,12 @@ def execute(db, agents, user, request: AllowedIntentRequest) -> dict:
                        for book in books[:params.limit]]}
     if intent == AllowedIntent.get_visible_campus_events:
         return _clean_events(db, user, params.limit)
+    if intent == AllowedIntent.get_my_notifications:
+        rows = agents["notification_agent"].for_user(
+            db, user_id=user.id, limit=min(params.limit, 50))
+        return {"notifications": [{key: item.get(key) for key in (
+            "title", "message", "notification_type", "route", "created_at", "at", "read")}
+            for item in rows]}
     if intent == AllowedIntent.get_my_timetable:
         student = _student_for_target(db, user, params) if user.role in {"student", "parent"} else None
         if user.role == "student" and student is None:
@@ -365,6 +746,37 @@ def execute(db, agents, user, request: AllowedIntentRequest) -> dict:
 def format_result(intent: AllowedIntent, result: dict) -> str:
     if "error" in result:
         return result["error"]
+    if intent in _DEPARTMENT_ANALYTICS_INTENTS:
+        code = result.get("department_code", "the authorized department")
+        year = result.get("academic_year")
+        semester = result.get("semester")
+        scope = (f"semester {semester} {code}" if semester else
+                 f"{('first', 'second', 'third', 'fourth')[year - 1]}-year {code}"
+                 if year else code)
+        if intent == AllowedIntent.get_department_student_count:
+            return f"There are {result.get('student_count', 0)} students in {scope}."
+        if intent == AllowedIntent.get_department_faculty_count:
+            return f"There are {result.get('faculty_count', 0)} faculty members in {code}."
+        if intent in {AllowedIntent.get_department_average_attendance,
+                      AllowedIntent.get_department_attendance_by_semester}:
+            if not result.get("students_included"):
+                return f"No attendance records are available for {scope}."
+            return (f"The average attendance for {scope} students is "
+                    f"{result.get('average_attendance', 0):.1f}%.")
+        if intent == AllowedIntent.get_department_attendance_risk_summary:
+            if not result.get("students_included"):
+                return f"No attendance records are available for {scope}."
+            return (f"{result.get('students_below_75', 0)} of "
+                    f"{result.get('students_included', 0)} {scope} students are below 75% attendance.")
+        if intent == AllowedIntent.get_department_marks_summary:
+            if not result.get("students_included"):
+                return f"No marks records are available for {scope}."
+            return f"The average marks for {scope} students are {result.get('average_marks', 0):.1f}%."
+        return f"Here is the authorized academic overview for {scope}."
+    if intent == AllowedIntent.get_institution_overview:
+        return (f"The institution overview includes {result.get('department_count', 0)} departments, "
+                f"{result.get('student_count', 0)} students, and "
+                f"{result.get('faculty_count', 0)} faculty members.")
     if intent in {AllowedIntent.get_my_attendance, AllowedIntent.get_my_subject_attendance}:
         rows = result.get("subjects", [])
         return "Overall attendance: {:.1f}%\n{}".format(
@@ -395,6 +807,11 @@ def format_result(intent: AllowedIntent, result: dict) -> str:
                 line += f" · apply: {row['application_url']}"
             lines.append(line)
         return "\n".join(lines) or "No placement drives are currently available."
+    if intent == AllowedIntent.get_my_scholarship_status:
+        return "Scholarship status: " + str(result.get("state", "unavailable")).replace("_", " ").title()
+    if intent == AllowedIntent.get_my_notifications:
+        rows = result.get("notifications", [])
+        return "\n".join(f"{item['title']}: {item['message']}" for item in rows) or "You have no notifications to show."
     if intent in {AllowedIntent.search_library_catalogue, AllowedIntent.get_library_book_availability}:
         return "\n".join(f"{book['title']} by {book['author']} — {book.get('available_copies', 0)} available" for book in result.get("books", [])) or "No matching active catalogue book was found."
     if intent == AllowedIntent.get_visible_campus_events:

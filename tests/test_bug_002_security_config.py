@@ -20,6 +20,7 @@ PRODUCTION_SECRET = "test-production-secret-0123456789-abcdefghijklmnopqrstuvwxy
 def _set_production(monkeypatch, secret: str | None) -> None:
     monkeypatch.setenv("MAWOS_ENV", "production")
     monkeypatch.setenv("MAWOS_SEED_DEMO_DATA", "false")
+    monkeypatch.setenv("MAWOS_CORS_ORIGINS", "https://frontend.example.test")
     if secret is None:
         monkeypatch.delenv("MAWOS_JWT_SECRET", raising=False)
     else:

@@ -17,6 +17,17 @@ the backend. For a separately hosted API, use a browser-reachable URL such as
 `https://api.example.edu/api`, never `http://backend:8000`. Rebuild frontend
 after changing it.
 
+`MAWOS_CORS_ORIGINS` controls browser access to the backend. Development and
+test mode default only to localhost ports 3000 and 5173. Production requires a
+comma-separated explicit origin list, for example:
+
+```env
+MAWOS_CORS_ORIGINS=https://frontend.example.edu,https://mawos-ui.onrender.com
+```
+
+Wildcards, paths, credentials, and HTTP production origins are rejected.
+MAWOS uses bearer tokens rather than cookies, so CORS credentials are disabled.
+
 ## Existing host PostgreSQL database (`external`)
 
 This is the default and is the appropriate mode for the existing MAWOS
@@ -84,10 +95,18 @@ the backend. When enabled, Ollama remains on the application network and has
 no network path or credentials for PostgreSQL.
 
 The Docker database uses a persistent named volume, starts empty, and is not a
-copy of the existing host database. Backend waits for PostgreSQL health, then
-correctly refuses to start until the intended schema/data have been explicitly
-restored or initialized. It never creates, resets, seeds, migrates, or removes
-the volume automatically. Do not use this mode as a shortcut to the host data.
+copy of the existing host database. It never creates, resets, seeds, migrates,
+or removes the volume automatically. Initialize an intended fresh database
+explicitly with the migration-owner command below; this creates schema only:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.docker-db.yml up -d postgres
+docker compose -f docker-compose.yml -f docker-compose.docker-db.yml run --rm --no-deps backend alembic upgrade head
+docker compose -f docker-compose.yml -f docker-compose.docker-db.yml up -d backend frontend
+```
+
+The new initial migration runs only for empty databases. Existing databases at
+the historical baseline revision or newer are not reset or recreated.
 
 ## Backup, restore, and migrations
 
@@ -121,6 +140,28 @@ For an existing MAWOS database whose documented baseline is already present,
 use the reviewed project procedure (which may require `alembic stamp head`)
 rather than blindly upgrading. Never run migration commands automatically or
 against production without a backup and change approval.
+
+## Render
+
+Both runtime images honor Render's injected `PORT`: backend defaults to 8000
+for local Docker and frontend defaults to 8080 behind Compose's localhost:3000
+mapping. For separate Render services, configure:
+
+```env
+# Backend runtime
+MAWOS_ENV=production
+MAWOS_DATABASE_MODE=external
+MAWOS_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:5432/mawos
+MAWOS_JWT_SECRET=RANDOM_32_BYTE_OR_LONGER_SECRET
+MAWOS_CORS_ORIGINS=https://YOUR-FRONTEND.onrender.com
+MAWOS_AI_PROVIDER=disabled
+
+# Frontend build
+VITE_API_BASE_URL=https://YOUR-BACKEND.onrender.com/api
+```
+
+Run `alembic upgrade head` once with a migration-owner account against the
+intended empty or existing database before starting the restricted API runtime.
 
 ## Hosted and local AI providers
 

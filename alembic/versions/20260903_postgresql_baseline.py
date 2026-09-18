@@ -8,7 +8,7 @@ from alembic import op
 
 
 revision = "20260903_postgresql_baseline"
-down_revision = None
+down_revision = "20260902_initial_schema"
 branch_labels = None
 depends_on = None
 

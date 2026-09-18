@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from . import config, llm
 from . import router as hybrid_router
@@ -61,6 +62,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="MAWOS", version="2.0.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(config.cors_origins()),
+    allow_credentials=False,  # MAWOS uses Authorization: Bearer, never cookies.
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
+)
 from .timetable.api import router as timetable_router
 from .timetable import reads  # Register published-view routes.
 app.include_router(timetable_router)

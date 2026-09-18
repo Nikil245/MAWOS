@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .. import assistant_routing as conversational
 from .. import config, llm, provenance, router
+from ..assistant_response import structure_response
 from ..library import assistant as library_assistant
 from .. import read_only_db
 from . import tools as toolreg
@@ -149,6 +150,7 @@ class OrchestratorAgent(BaseAgent):
                               "You may ask about your own attendance or other authorized records."}
         intent = request.intent.value
         denied = "error" in result
+        analytics = read_only_db.is_analytics_intent(request.intent)
         public_tool_name = {
             "get_my_attendance": "get_attendance",
             "get_my_subject_attendance": "get_attendance",
@@ -158,10 +160,14 @@ class OrchestratorAgent(BaseAgent):
         }.get(intent, intent)
         return {
             "text": read_only_db.format_result(request.intent, result),
-            "category": ("unsupported" if denied and intent in {
+            "category": ("unsupported" if denied and (intent in {
                 "search_library_catalogue", "get_library_book_availability"}
-                else "sensitive_or_disallowed" if denied else "personal_record"),
-            "source_label": "Safe fallback" if denied else "Deterministic answer",
+                or (analytics and user.role in {"student", "parent", "faculty", "librarian"}))
+                else "sensitive_or_disallowed" if denied else
+                "department_record" if analytics else "personal_record"),
+            "source_label": ("Safe fallback" if denied else
+                             "Deterministic MAWOS result" if analytics else
+                             "Deterministic answer"),
             "mode": "scope" if denied else "lexicon",
             "intent": intent,
             "tools_used": [] if denied else [{"name": public_tool_name, "args": {},
@@ -545,6 +551,19 @@ class OrchestratorAgent(BaseAgent):
     # ------------------------------------------------------------------ router
     async def handle_chat(self, db, user, message: str, context_topic=None,
                           conversation_context: list[dict] | None = None) -> dict:
+        """Return the same strict structured contract to HTTP and internal callers."""
+        started = time.perf_counter()
+        result = await self._handle_chat_result(
+            db, user, message, context_topic=context_topic,
+            conversation_context=conversation_context,
+        )
+        return structure_response(
+            result, role=user.role,
+            duration_ms=(time.perf_counter() - started) * 1000,
+        )
+
+    async def _handle_chat_result(self, db, user, message: str, context_topic=None,
+                                  conversation_context: list[dict] | None = None) -> dict:
         """Route first; context is untrusted and never authority or evidence."""
         # 1. Secrets, bypasses, mutations, execution, and personalized
         # high-stakes requests are rejected before any model or data access.

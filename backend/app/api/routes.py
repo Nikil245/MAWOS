@@ -339,6 +339,9 @@ async def chat(body: ChatRequest, user: User = Depends(require_role(*CHAT_PORTAL
                 result["context_issued_at"] = prior_assistant["issued_at"]
             # The HMAC key remains server-only. The browser only returns this server-issued proof.
             result["context_proof"] = _context_proof(user, prior_user, prior_assistant)
+        # ``handle_chat`` already applies the strict structured-response
+        # boundary. Re-projecting it here duplicated fallback copy and could
+        # discard specialized blocks.
         return result
     finally:
         logger.info(

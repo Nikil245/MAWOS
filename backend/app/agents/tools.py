@@ -113,6 +113,23 @@ _ROLE_CAPABILITY_COPY = {
         "placeholder": "Ask about a supported student record or academic topic…",
         "record_group": "Supported records",
     },
+    "parent": {
+        "title": "Parent academic assistant",
+        "subtitle": "Linked-child records and grounded academic help",
+        "description": ("You may view records only for an actively linked child, including attendance, "
+                        "fees, internal marks, hall-ticket eligibility, timetable, placements and "
+                        "scholarship status. You may also ask general learning and MAWOS questions."),
+        "placeholder": "Ask about your actively linked child's records…",
+        "record_group": "Linked child records",
+    },
+    "librarian": {
+        "title": "Librarian operations assistant",
+        "subtitle": "Read-only operational and learning help",
+        "description": ("You may ask about notifications, visible campus events, approved MAWOS "
+                        "information and general learning topics. Catalogue management remains in the Library workspace."),
+        "placeholder": "Ask an operational or learning question…",
+        "record_group": "Operations",
+    },
 }
 
 
@@ -136,6 +153,24 @@ def assistant_capabilities(role: str, display_name: str | None = None) -> dict:
     ]
     if role == "faculty":
         record_prompts.append("How do I find my assigned subjects?")
+    if role == "student":
+        record_prompts.extend([
+            "Show my timetable", "Show my placements", "Show my scholarship status",
+            "Show my notifications", "Show my campus events",
+        ])
+    elif role == "parent":
+        records.extend([
+            {"category": "Linked child records", "scope": "one actively linked child's authorized records"},
+        ])
+        record_prompts.extend([
+            "Show my child's attendance", "Show my child's internal marks",
+            "Show my child's timetable", "Show my child's placements",
+            "Show my child's scholarship status",
+        ])
+    elif role in {"faculty", "hod"}:
+        record_prompts.extend(["Show my timetable", "Show my notifications", "Show visible campus events"])
+    elif role in {"principal", "admin", "librarian"}:
+        record_prompts.extend(["Show my notifications", "Show visible campus events"])
     mawos_prompts = ["What is a CIE?", "What is MAWOS?"]
     general_prompts = [
         "Explain machine learning simply.", "What is SQL normalization?",

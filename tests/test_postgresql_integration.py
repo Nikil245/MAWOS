@@ -10,6 +10,7 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -127,3 +128,40 @@ def test_basic_authenticated_api_query_uses_postgresql_session(postgres_engine):
         session.query(User).filter_by(username=username).delete()
         session.commit()
         session.close()
+
+
+def test_empty_postgresql_database_migrates_to_head_and_matches_runtime_schema():
+    """Exercise the supported clean-database path only on the guarded test server."""
+    source = _postgres_test_url()
+    source_url = make_url(source)
+    name = f"mawos_fresh_{uuid.uuid4().hex[:20]}"
+    fresh_url = source_url.set(database=name)
+    admin_engine = create_engine(source_url, isolation_level="AUTOCOMMIT", future=True)
+    fresh_engine = None
+    from backend.app import config as app_config
+    from backend.app import database as app_database
+    original_url, original_engine = app_config.DATABASE_URL, app_database.engine
+    try:
+        with admin_engine.connect() as connection:
+            database = connection.execute(text("SELECT current_database()")).scalar_one()
+            require_test_database_name(database)
+            connection.execute(text(f'CREATE DATABASE "{name}"'))
+        app_config.DATABASE_URL = fresh_url.render_as_string(hide_password=False)
+        from alembic import command
+        from alembic.config import Config
+        alembic_config = Config(str(__import__("pathlib").Path(__file__).resolve().parents[1] / "alembic.ini"))
+        command.upgrade(alembic_config, "head")
+        fresh_engine = create_engine(fresh_url, future=True)
+        required = set(Base.metadata.tables)
+        assert required <= set(inspect(fresh_engine).get_table_names(schema="public"))
+        app_database.engine = fresh_engine
+        app_database.verify_existing_schema()
+    finally:
+        app_config.DATABASE_URL = original_url
+        app_database.engine = original_engine
+        if fresh_engine is not None:
+            fresh_engine.dispose()
+        with admin_engine.connect() as connection:
+            connection.execute(text("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :name"), {"name": name})
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        admin_engine.dispose()
