@@ -161,6 +161,47 @@ def _fees(data: dict) -> tuple[str, list[dict]]:
 
 
 def _placements(data: dict) -> tuple[str, list[dict]]:
+    if data.get("placement_summary"):
+        eligible = int(data.get("placement_eligible_count") or 0)
+        if not data.get("offer_data_available"):
+            return "Placement offer records are not available in the current MAWOS database.", [
+                {"type": "metric_cards", "title": "Placement overview", "cards": [
+                    {"label": "Eligible / shortlisted", "value": str(eligible), "tone": "info"},
+                    {"label": "Confirmed offers", "value": "Unavailable", "tone": "warning"},
+                ]},
+                {"type": "empty_state", "title": "Offer records unavailable",
+                 "message": "The current database does not provide confirmed placement-offer records."},
+            ]
+        offers = data.get("offers") if isinstance(data.get("offers"), list) else []
+        count = int(data.get("confirmed_offer_count") or 0)
+        summary = ("No placement records are available in your authorized scope."
+                   if not data.get("placement_records_available") else
+                   f"You have {count} confirmed placement offer{'s' if count != 1 else ''}."
+                   if count else "No confirmed placement offers are recorded for you yet.")
+        blocks: list[dict] = [{"type": "metric_cards", "title": "Placement overview", "cards": [
+            {"label": "Eligible / shortlisted", "value": str(eligible), "tone": "info"},
+            {"label": "Confirmed offers", "value": str(count),
+             "tone": "success" if count else "neutral"},
+        ]}]
+        cards = []
+        for row in offers[:20]:
+            if not isinstance(row, dict):
+                continue
+            cards.append({"company": _plain(row.get("company"), 128) or "Company",
+                          "role": _plain(row.get("role"), 128) or "Role not specified",
+                          "package": (f"{float(row['package_offered']):g} LPA"
+                                      if row.get("package_offered") is not None else None),
+                          "deadline": (_display(row.get("application_deadline"))
+                                       if row.get("application_deadline") else None),
+                          "eligibility": "Confirmed offer",
+                          "status": _plain(row.get("status"), 80) or None,
+                          "apply_url": row.get("application_url")})
+        if cards:
+            blocks.append({"type": "placement_cards", "title": "Recorded offers", "cards": cards})
+        else:
+            blocks.append({"type": "empty_state", "title": "No confirmed offers",
+                           "message": "No confirmed placement offers are recorded in your authorized scope."})
+        return summary, blocks
     drives = data.get("drives") if isinstance(data.get("drives"), list) else []
     cards = []
     for row in drives[:15]:
@@ -322,24 +363,104 @@ def _analytics(result: dict, data: dict) -> tuple[str, list[dict]]:
     """Render only allowlisted aggregate DTO fields; never expose row identity."""
     summary = _plain(result.get("text"), 1200) or "Here is the authorized analytics result."
     kind = str(data.get("analytics_kind") or result.get("intent") or "")
-    institution = kind == "get_institution_overview"
+    placement = kind in {"get_department_placement_summary",
+                         "get_department_placed_student_count",
+                         "get_department_offer_count"}
+    if placement:
+        available = bool(data.get("offer_data_available"))
+        cards = [
+            {"label": "Total students", "value": str(data.get("student_count", 0)), "tone": "neutral"},
+            {"label": "Placement-eligible students", "value": str(data.get("placement_eligible_students", 0)), "tone": "info"},
+            {"label": "Students with confirmed offers",
+             "value": str(data.get("students_with_confirmed_offers", 0)) if available else "Unavailable",
+             "tone": "success" if available and data.get("students_with_confirmed_offers") else "warning" if not available else "neutral"},
+            {"label": "Total offers", "value": str(data.get("total_offers", 0)) if available else "Unavailable",
+             "tone": "success" if available and data.get("total_offers") else "warning" if not available else "neutral"},
+            {"label": "Students without an offer",
+             "value": str(data.get("students_without_offer", 0)) if available else "Unavailable", "tone": "neutral"},
+        ]
+        blocks: list[dict] = [{"type": "metric_cards", "title": "Placement analytics", "cards": cards}]
+        source_rows = data.get("rows") if isinstance(data.get("rows"), list) else []
+        table_rows = []
+        if data.get("institution_scope"):
+            columns = [{"key": "department", "label": "Department"},
+                       {"key": "students", "label": "Total students"},
+                       {"key": "eligible", "label": "Placement-eligible"},
+                       {"key": "placed", "label": "Students with offers"},
+                       {"key": "offers", "label": "Total offers"},
+                       {"key": "without_offer", "label": "Without an offer"}]
+            for row in source_rows:
+                table_rows.append({"department": _plain(row.get("department_code"), 20),
+                                   "students": int(row.get("student_count") or 0),
+                                   "eligible": int(row.get("placement_eligible_students") or 0),
+                                   "placed": (int(row.get("students_with_confirmed_offers") or 0)
+                                              if row.get("offer_data_available") else "Unavailable"),
+                                   "offers": (int(row.get("total_offers") or 0)
+                                              if row.get("offer_data_available") else "Unavailable"),
+                                   "without_offer": (int(row.get("students_without_offer") or 0)
+                                                     if row.get("offer_data_available") else "Unavailable")})
+        else:
+            columns = [{"key": "company", "label": "Company"},
+                       {"key": "role", "label": "Drive / role"},
+                       {"key": "students", "label": "Students with offers"},
+                       {"key": "offers", "label": "Total offers"}]
+            for row in source_rows:
+                table_rows.append({"company": _plain(row.get("company"), 128),
+                                   "role": _plain(row.get("role"), 128),
+                                   "students": int(row.get("students_with_offers") or 0),
+                                   "offers": int(row.get("offer_count") or 0)})
+        if table_rows:
+            blocks.append({"type": "table", "title": "Placement breakdown",
+                           "caption": "Aggregate placement values within the authenticated scope",
+                           "columns": columns, "rows": table_rows[:100]})
+        elif not available:
+            blocks.append({"type": "empty_state", "title": "Offer records unavailable",
+                           "message": "The current database does not provide confirmed placement-offer records."})
+        elif not data.get("placement_records_available"):
+            blocks.append({"type": "empty_state", "title": "No placement records",
+                           "message": "No placement records are available in this authorized scope."})
+        else:
+            blocks.append({"type": "empty_state", "title": "No confirmed offers",
+                           "message": "No confirmed placement offers are recorded in this authorized scope yet."})
+        return summary, blocks
+    institution = kind in {"get_institution_overview", "get_institution_department_overview",
+                           "get_institution_attendance_summary"}
     code = _plain(data.get("department_code"), 20) or "Institution"
     cards: list[dict] = []
     if institution:
         cards = [
             {"label": "Departments", "value": str(data.get("department_count", 0)), "tone": "info"},
             {"label": "Students", "value": str(data.get("student_count", 0)), "tone": "neutral"},
-            {"label": "Faculty", "value": str(data.get("faculty_count", 0)), "tone": "neutral"},
         ]
+        if "faculty_count" in data:
+            cards.append({"label": "Faculty", "value": str(data.get("faculty_count", 0)), "tone": "neutral"})
+        if kind == "get_institution_attendance_summary":
+            cards.extend([
+                {"label": "Students included", "value": str(data.get("students_included", 0)), "tone": "neutral"},
+                {"label": "Average attendance", "value": f"{float(data.get('average_attendance') or 0):.1f}%",
+                 "tone": "warning" if float(data.get("average_attendance") or 0) < 75 else "success"},
+            ])
     elif kind == "get_department_faculty_count":
         cards = [
             {"label": "Department", "value": code, "tone": "info"},
             {"label": "Faculty", "value": str(data.get("faculty_count", 0)), "tone": "neutral"},
         ]
-    elif kind == "get_department_student_count":
+    elif kind in {"get_department_student_count", "get_department_student_count_by_year"}:
         cards = [
             {"label": "Department", "value": code, "tone": "info"},
             {"label": "Students", "value": str(data.get("student_count", 0)), "tone": "neutral"},
+        ]
+        if data.get("year"):
+            cards.append({"label": "Academic year", "value": str(data["year"]), "tone": "neutral"})
+    elif kind == "get_department_average_cgpa":
+        included = int(data.get("students_included") or 0)
+        if not included:
+            return summary, [{"type": "empty_state", "title": "No CGPA data",
+                              "message": "No CGPA records matched the authorized department scope."}]
+        cards = [
+            {"label": "Department", "value": code, "tone": "info"},
+            {"label": "Students included", "value": str(included), "tone": "neutral"},
+            {"label": "Average CGPA", "value": f"{float(data.get('average_cgpa') or 0):.2f}", "tone": "neutral"},
         ]
     elif kind == "get_department_marks_summary":
         included = int(data.get("students_included") or 0)
@@ -373,19 +494,26 @@ def _analytics(result: dict, data: dict) -> tuple[str, list[dict]]:
     source_rows = data.get("rows") if isinstance(data.get("rows"), list) else []
     rows = []
     if institution:
-        columns = [
-            {"key": "department", "label": "Department"},
-            {"key": "students", "label": "Students"},
-            {"key": "faculty", "label": "Faculty"},
-            {"key": "average_attendance", "label": "Average attendance"},
-            {"key": "below_75", "label": "Below 75%"},
-        ]
-        rows = [{"department": _plain(row.get("department_code"), 20),
-                 "students": int(row.get("student_count") or 0),
-                 "faculty": int(row.get("faculty_count") or 0),
-                 "average_attendance": f"{float(row.get('average_attendance') or 0):.1f}%",
-                 "below_75": int(row.get("students_below_75") or 0)}
-                for row in source_rows if isinstance(row, dict)]
+        columns = [{"key": "department", "label": "Department"},
+                   {"key": "students", "label": "Students"}]
+        if source_rows and "faculty_count" in source_rows[0]:
+            columns.append({"key": "faculty", "label": "Faculty"})
+        columns.extend([{"key": "average_attendance", "label": "Average attendance"},
+                        {"key": "below_75", "label": "Below 75%"}])
+        if source_rows and "average_cgpa" in source_rows[0]:
+            columns.append({"key": "average_cgpa", "label": "Average CGPA"})
+        for row in source_rows:
+            if not isinstance(row, dict):
+                continue
+            clean = {"department": _plain(row.get("department_code"), 20),
+                     "students": int(row.get("student_count") or 0),
+                     "average_attendance": f"{float(row.get('average_attendance') or 0):.1f}%",
+                     "below_75": int(row.get("students_below_75") or 0)}
+            if "faculty_count" in row:
+                clean["faculty"] = int(row.get("faculty_count") or 0)
+            if "average_cgpa" in row:
+                clean["average_cgpa"] = f"{float(row.get('average_cgpa') or 0):.2f}"
+            rows.append(clean)
     elif source_rows:
         first = source_rows[0]
         if "subject_code" in first:
@@ -498,7 +626,7 @@ def _suggestions(intent: str, category: str, role: str) -> list[str]:
         chosen = ["Explain that more simply", "Give me a short example", "What should I learn next?"]
     if chosen is None:
         chosen = ["What can you help me with?", "What is MAWOS?", "Explain machine learning simply"]
-    analytics_suggestions = "department_" in lowered or "institution_overview" in lowered
+    analytics_suggestions = "department_" in lowered or "institution_" in lowered
     if role == "parent" and not analytics_suggestions:
         chosen = [item.replace("my ", "my child's ") for item in chosen]
     if not studentish and not analytics_suggestions:
@@ -515,7 +643,12 @@ def _safe_trace(result: dict, role: str, duration_ms: float, intent: str) -> dic
     if role not in {"admin", "hod", "principal", "faculty"}:
         return None
     source = _source(result)
-    provider_detail = ("Groq used for a general-learning explanation" if source == "groq" else
+    classified_only = bool(result.get("routing", {}).get("attempted_llm")
+                           and result.get("routing", {}).get("accepted_llm")
+                           and source == "deterministic" and data_is_aggregate(result))
+    provider_detail = ("Groq classified the aggregate intent; no database result was sent back"
+                       if classified_only else
+                       "Groq used for a general-learning explanation" if source == "groq" else
                        "Local AI used for a general-learning explanation" if source == "ollama" else
                        "AI provider bypassed for this deterministic request" if source == "deterministic" else
                        "Safe fallback used; no unverified record claim returned")
@@ -529,6 +662,11 @@ def _safe_trace(result: dict, role: str, duration_ms: float, intent: str) -> dic
                   "status": "safe_fallback" if source == "safe_fallback" else "bypassed" if source == "deterministic" else "complete"})
     return {"visibility": "collapsible", "summary": "Safe routing and authorization details",
             "steps": steps, "duration_ms": round(max(0, duration_ms), 1)}
+
+
+def data_is_aggregate(result: dict) -> bool:
+    data = result.get("data")
+    return isinstance(data, dict) and bool(data.get("analytics_kind"))
 
 
 def _legacy_actions(result: dict) -> list[dict]:

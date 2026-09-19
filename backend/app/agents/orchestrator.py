@@ -31,7 +31,7 @@ import time
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .. import assistant_routing as conversational
-from .. import config, llm, provenance, router
+from .. import ai_provider, config, llm, provenance, router
 from ..assistant_response import structure_response
 from ..library import assistant as library_assistant
 from .. import read_only_db
@@ -185,6 +185,71 @@ class OrchestratorAgent(BaseAgent):
                 "reason": "read-only allowlisted database operation",
                 "fallback_from": None,
             },
+        }
+
+    async def _handle_database_query(self, db, user, message: str) -> dict:
+        """Classify aggregates with Groq, then authorize and execute locally."""
+        fallback_request = read_only_db.classify_database_fallback(message)
+        attempted = False
+        accepted = False
+        failure_code = None
+        request = None
+        if read_only_db.role_has_database_analytics(user.role):
+            reply = await ai_provider.classify_database_async(
+                read_only_db.database_classifier_messages(message),
+                user_key=(f"{user.role}:"
+                          f"{getattr(user, 'id', None) or getattr(user, 'username', None) or 'unknown'}"),
+            )
+            attempted = reply.provider == "groq" or reply.error_code not in {"provider_disabled", "missing_key"}
+            failure_code = reply.error_code
+            if reply.message and isinstance(reply.message.get("content"), str):
+                try:
+                    candidate = read_only_db.validate_database_intent_response(
+                        reply.message["content"])
+                    if read_only_db.database_intent_matches_question(candidate, message):
+                        request = candidate
+                        accepted = True
+                    else:
+                        failure_code = "unsupported_database_intent"
+                except (TypeError, ValueError):
+                    failure_code = "invalid_database_intent"
+        if request is None:
+            legacy = read_only_db.classify_deterministic(message)
+            if legacy is not None and read_only_db.is_analytics_intent(legacy.intent):
+                return self._handle_allowlisted_read(db, user, legacy)
+            request = fallback_request
+        if request is None or not read_only_db.database_intent_matches_question(request, message):
+            text = "I cannot retrieve that database information through the assistant."
+            return {
+                "text": text, "category": "unsupported", "source_label": "Safe fallback",
+                "mode": "scope", "intent": "unsupported_database_query", "tools_used": [],
+                "latency_ms": 0.0, "data": {"error": text}, "fallback": True,
+                "fallback_code": failure_code or "unsupported_database_query",
+                "actions": [], "context_books": [],
+                "routing": {"tier": "scope", "margin": 0.0, "tau": router.TAU,
+                            "escalated": attempted, "attempted_llm": attempted,
+                            "accepted_llm": False, "deterministic_fallback": False,
+                            "reason": "unsupported database request rejected before general AI",
+                            "fallback_from": "llm" if attempted else None},
+            }
+        result = read_only_db.execute_database_intent(db, user, request)
+        denied = "error" in result
+        return {
+            "text": read_only_db.format_database_result(request.intent, result),
+            "category": "sensitive_or_disallowed" if denied else "department_record",
+            "source_label": "Safe fallback" if denied else "Deterministic MAWOS result",
+            "mode": "scope" if denied else "lexicon", "intent": request.intent.value,
+            "tools_used": [] if denied else [{"name": request.intent.value, "args": {}, "ms": 0.0}],
+            "latency_ms": 0.0, "data": result, "fallback": denied,
+            "fallback_code": "database_scope_denied" if denied else None,
+            "actions": [], "context_books": [],
+            "routing": {"tier": "scope" if denied else "lexicon", "margin": 1.0,
+                        "tau": router.TAU, "escalated": attempted,
+                        "attempted_llm": attempted, "accepted_llm": accepted and not denied,
+                        "deterministic_fallback": bool(not accepted and fallback_request and not denied),
+                        "reason": ("authorized fixed aggregate query"
+                                   if not denied else "database aggregate authorization denied"),
+                        "fallback_from": ("llm" if attempted and not accepted else None)},
         }
 
     @staticmethod
@@ -548,6 +613,22 @@ class OrchestratorAgent(BaseAgent):
             },
         }
 
+    @staticmethod
+    def _privacy_input_response() -> dict:
+        return {
+            "text": ("For your privacy, remove email addresses, phone numbers, residential "
+                     "addresses, dates of birth, student identifiers, credentials, tokens, "
+                     "or connection details before using AI-assisted chat."),
+            "mode": "scope", "category": "sensitive_or_disallowed",
+            "source_label": "Safe fallback", "tools_used": [], "latency_ms": 0.0,
+            "fallback": False, "intent": "privacy_input_rejected",
+            "routing": {"tier": "scope", "margin": 0.0, "tau": router.TAU,
+                        "escalated": False, "attempted_llm": False,
+                        "accepted_llm": False, "deterministic_fallback": False,
+                        "reason": "PII rejected before hosted provider routing",
+                        "fallback_from": None},
+        }
+
     # ------------------------------------------------------------------ router
     async def handle_chat(self, db, user, message: str, context_topic=None,
                           conversation_context: list[dict] | None = None) -> dict:
@@ -567,6 +648,8 @@ class OrchestratorAgent(BaseAgent):
         """Route first; context is untrusted and never authority or evidence."""
         # 1. Secrets, bypasses, mutations, execution, and personalized
         # high-stakes requests are rejected before any model or data access.
+        if ai_provider.contains_sensitive_pii(message):
+            return self._privacy_input_response()
         if _SENSITIVE_INPUT.search(message):
             result = self._sensitive_input_response(user)
             result.update(category="sensitive_or_disallowed", source_label="Safe fallback")
@@ -581,6 +664,15 @@ class OrchestratorAgent(BaseAgent):
         # All database-related intents are selected and executed locally. The
         # provider is intentionally not consulted, even when it is healthy.
         allowlisted = read_only_db.classify_deterministic(message)
+        # Aggregate analytics use the strict Groq-classifier/fixed-query path
+        # below. Personal and operational reads remain fully deterministic.
+        if allowlisted is not None and allowlisted.intent in {
+                read_only_db.AllowedIntent.get_department_student_count,
+                read_only_db.AllowedIntent.get_department_average_attendance,
+                read_only_db.AllowedIntent.get_department_attendance_by_semester,
+                read_only_db.AllowedIntent.get_department_attendance_risk_summary,
+                read_only_db.AllowedIntent.get_institution_overview}:
+            allowlisted = None
         legacy_record = allowlisted is not None and allowlisted.intent.value in {
             "get_my_attendance", "get_my_subject_attendance", "get_my_marks",
             "get_my_fee_status", "get_my_profile", "get_my_hall_ticket_eligibility",
@@ -602,10 +694,6 @@ class OrchestratorAgent(BaseAgent):
                     f"{user.role}:{getattr(user, 'id', None) or getattr(user, 'username', None) or user.usn}")
             except Exception:
                 return library_assistant.unavailable_response(library_request.term)
-        department_summary = self._department_summary_response(db, user, message, self.agents)
-        if department_summary is not None:
-            return department_summary
-        query = conversational.normalize(message)
         identifiers = toolreg.chat_args_from_message(message)
         if user.role == "student" and (
                 conversational.OTHER_STUDENT.search(message)
@@ -619,6 +707,17 @@ class OrchestratorAgent(BaseAgent):
                 "sensitive_or_disallowed",
                 "I can only show the safe profile of the currently authenticated user.",
                 source="Safe fallback")
+        department_summary = self._department_summary_response(db, user, message, self.agents)
+        combined_or_faculty_count = bool(
+            re.search(r"\b(?:faculty|teachers?)\b", message, re.I))
+        if department_summary is not None and combined_or_faculty_count:
+            return department_summary
+        if (conversational.match_topic(message) is None
+                and read_only_db.looks_like_database_query(message)):
+            return await self._handle_database_query(db, user, message)
+        if department_summary is not None:
+            return department_summary
+        query = conversational.normalize(message)
 
         fee_structure = conversational.fee_structure_request(message)
         if fee_structure == "official":

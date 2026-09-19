@@ -184,11 +184,12 @@ requests without background polling. See `docs/DOCKER.md` for validated limits.
 
 Provider modes are `auto` (Groq → Ollama → deterministic-only), `groq`
 (Groq only), `ollama` (local only), and `disabled` (no generative calls).
-Only bounded general-learning text and sanitized title/author/category catalogue
-metadata can enter this layer. Private records, live stock counts, borrower data,
-database access, JWTs, internal IDs, and credentials cannot. A per-user limit
-applies only to generative turns; deterministic record and catalogue searches do
-not consume it.
+Only bounded general-learning text, sanitized title/author/category catalogue
+metadata, and aggregate-query text sent for strict intent classification can
+enter this layer. Aggregate results never return to the provider. Private
+records, live stock counts, borrower data, database access, SQL, JWTs, internal
+IDs, and credentials cannot. A per-user limit applies only to provider turns;
+deterministic record and catalogue searches do not consume it.
 
 ### B. Fresh Docker PostgreSQL
 

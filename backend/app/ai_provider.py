@@ -39,6 +39,23 @@ _groq_health_lock = asyncio.Lock()
 _rate_lock = threading.Lock()
 _rate_windows: dict[str, deque[float]] = defaultdict(deque)
 
+_PII_INPUT = re.compile(
+    r"(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})"
+    r"|(?<!\w)(?:\+?\d[\d\s().-]{7,}\d)(?!\w)"
+    r"|\b(?:date\s+of\s+birth|dob|born\s+on)\b\s*(?:is\s*)?[:=-]?\s*"
+    r"(?:\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|[A-Za-z]+\s+\d{1,2},?\s+\d{4})"
+    r"|\b\d{1,6}\s+[A-Za-z0-9][A-Za-z0-9 .'-]{1,60}\s"
+    r"(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd|"
+    r"apartment|apt|flat|house|nagar|layout|cross)\b"
+    r"|\b(?:password|passwd|api[ _-]?key|authorization|bearer|access[ _-]?token|"
+    r"refresh[ _-]?token|secret|private[ _-]?key|client[ _-]?secret|"
+    r"connection[ -]?string)\b"
+    r"|postgres(?:ql)?(?:\+psycopg)?://|mysql(?:\+\w+)?://|mongodb(?:\+srv)?://"
+    r"|\beyJ[\w-]+\.[\w-]+\.[\w-]+"
+    r"|\b[0-9][A-Z]{2}[0-9]{2}[A-Z]{2,4}[0-9]{3}\b",
+    re.IGNORECASE,
+)
+
 _PRIVATE_INPUT = re.compile(
     r"\b(?:password|passwd|api[ _-]?key|authorization|bearer|access[ _-]?token|"
     r"refresh[ _-]?token|secret|connection[ -]?string|borrower|reservation|fine|"
@@ -47,6 +64,11 @@ _PRIVATE_INPUT = re.compile(
     r"|\b[0-9][A-Za-z0-9]{5,15}\b|(?:₹|\b(?:inr|rs\.?)\b|\b\d{1,3}(?:\.\d+)?\s*%)",
     re.IGNORECASE,
 )
+
+
+def contains_sensitive_pii(value: str) -> bool:
+    """Detect user-entered identifiers/credentials before any hosted request."""
+    return bool(isinstance(value, str) and _PII_INPUT.search(value))
 
 
 def _api_key() -> str | None:
@@ -130,7 +152,7 @@ def _safe_messages(messages: list[dict]) -> list[dict] | None:
             return None
         if not content.strip() or len(content) > 2000:
             return None
-        if role != "system" and _PRIVATE_INPUT.search(content):
+        if role != "system" and (contains_sensitive_pii(content) or _PRIVATE_INPUT.search(content)):
             return None
         total += len(content)
         if total > config.GROQ_MAX_INPUT_CHARS:
@@ -193,9 +215,9 @@ async def check_groq_async(force: bool = False) -> bool:
         return True
 
 
-async def _chat_groq(messages: list[dict]) -> ProviderResult:
+async def _chat_groq(messages: list[dict], *, prevalidated: bool = False) -> ProviderResult:
     started = time.perf_counter()
-    safe = _safe_messages(messages)
+    safe = messages if prevalidated else _safe_messages(messages)
     if safe is None:
         return ProviderResult(error_code="private_or_invalid_input", provider="groq")
     body = {
@@ -233,6 +255,44 @@ async def _chat_groq(messages: list[dict]) -> ProviderResult:
         error_code=last_error, latency_ms=(time.perf_counter() - started) * 1000,
         provider="groq", model=config.GROQ_MODEL,
     )
+
+
+async def classify_database_async(messages: list[dict], *, user_key: str) -> ProviderResult:
+    """Run the strict aggregate-intent classifier on Groq only.
+
+    This path has no Ollama fallback and receives no database result. Academic
+    vocabulary is permitted, but PII, credentials, SQL and internal schema
+    vocabulary are rejected before transport.
+    """
+    if config.AI_PROVIDER not in {"auto", "groq"}:
+        return ProviderResult(error_code="provider_disabled")
+    if not _rate_allowed(user_key):
+        return ProviderResult(error_code="local_rate_limited")
+    if not isinstance(messages, list) or not 1 <= len(messages) <= 3:
+        return ProviderResult(error_code="private_or_invalid_input", provider="groq")
+    total = 0
+    safe = []
+    forbidden = re.compile(
+        r"(?:;|--|/\*|\*/|\b(?:select|insert|update|delete|drop|alter|union|pragma)\b|"
+        r"\b(?:users|password_hash|attendance_summary|marks_records|audit_logs?|"
+        r"workflow_events?|user_id|student_id|database_id)\b)", re.I)
+    for item in messages:
+        if not isinstance(item, dict) or set(item) != {"role", "content"}:
+            return ProviderResult(error_code="private_or_invalid_input", provider="groq")
+        role, content = item.get("role"), item.get("content")
+        if role not in {"system", "user"} or not isinstance(content, str) or not content.strip():
+            return ProviderResult(error_code="private_or_invalid_input", provider="groq")
+        if len(content) > 4000 or (role == "user" and (
+                contains_sensitive_pii(content) or forbidden.search(content))):
+            return ProviderResult(error_code="private_or_invalid_input", provider="groq")
+        total += len(content)
+        if total > config.GROQ_MAX_INPUT_CHARS:
+            return ProviderResult(error_code="private_or_invalid_input", provider="groq")
+        safe.append({"role": role, "content": content})
+    if not await check_groq_async():
+        return ProviderResult(error_code=_groq_health_error or "unavailable",
+                              provider="groq", model=config.GROQ_MODEL)
+    return await _chat_groq(safe, prevalidated=True)
 
 
 async def generate_async(

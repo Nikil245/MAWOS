@@ -133,6 +133,34 @@ sanitized catalogue fields (`index`, title, author and category) may be sent
 to the provider, and the server validates the selected indices before it
 formats the final answer.
 
+Aggregate analytics use a separate strict classification envelope:
+`DatabaseIntent`, `DatabaseIntentParameters`, `DatabaseIntentRequest`, and
+`DatabaseIntentResponse`. Groq may receive only the bounded aggregate question
+and may return only `kind=database_query`, one approved intent and the four
+closed selectors (`department`, `year`, `semester`, `subject`). FastAPI validates
+the response, binds it to the authenticated role, executes a fixed ORM query and
+renders the result. SQL, schema names, identity selectors and extra fields are
+rejected, and aggregate results are never sent back to Groq.
+
+The approved aggregate intents are:
+
+- `get_department_student_count`
+- `get_department_student_count_by_year`
+- `get_department_average_attendance`
+- `get_department_average_attendance_by_year`
+- `get_department_average_cgpa`
+- `get_department_attendance_risk_count`
+- `get_department_subject_attendance_summary`
+- `get_institution_department_overview`
+- `get_institution_attendance_summary`
+
+Faculty can use only assigned subject/class attendance summaries, HODs are
+bound to their own department, and principal/admin accounts receive only
+institution aggregates. Student, parent and librarian roles cannot use this
+aggregate surface. Email addresses, phone numbers, residential addresses,
+dates of birth, credentials, tokens, database URLs and student identifiers are
+blocked before a hosted provider request.
+
 Students are bound to their authenticated student record. Parents may select
 only an actively linked child. Faculty and HOD access remains assignment- or
 department-scoped, while unsupported roles and resources receive a stable safe
