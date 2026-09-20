@@ -23,6 +23,25 @@ from ..notifications import notify_usns
 INDIA = ZoneInfo('Asia/Kolkata')
 ACTIVE_ISSUES = ('ISSUED', 'RETURN_PENDING')
 
+# These aliases are deliberately small and explicit.  They are applied before
+# catalogue lookup so common course abbreviations never degrade into a broad
+# keyword search (for example, treating "available" as the useful query term).
+_DSA_ALIAS = re.compile(
+    r"\b(?:dsa|data\s+structure(?:s)?|algorithm(?:s)?|"
+    r"data\s+structures?\s+and\s+algorithms?)\b", re.I)
+_DSA_CANONICAL = "Data Structures and Algorithms"
+_DSA_TERMS = ("data structures", "algorithms", "algorithm analysis", "algorithm")
+
+
+def canonical_catalogue_term(term: str) -> str:
+    """Normalize supported subject aliases without expanding arbitrary input."""
+    value = " ".join(str(term or "").split())[:128]
+    return _DSA_CANONICAL if _DSA_ALIAS.search(value) else value
+
+
+def is_dsa_catalogue_term(term: str) -> bool:
+    return canonical_catalogue_term(term).casefold() == _DSA_CANONICAL.casefold()
+
 
 def iso(value):
     return value.replace(tzinfo=dt.timezone.utc).isoformat() if value else None
@@ -111,28 +130,44 @@ def catalogue(db, q='', offset=0, limit=20, include_archived=False):
         query.order_by(func.lower(Book.title), Book.id).offset(offset).limit(limit)]}
 
 
-def assistant_catalogue_search(db, term, limit=12):
+def assistant_catalogue_search(db, term, limit=12, *, available_only=False):
     """Return ranked, active catalogue facts safe for student chat.
 
     This deliberately has no circulation joins and exposes no database IDs,
     borrower data, reviews, popularity, or mutation capability. Department
     mappings improve discovery only; they never filter student visibility.
     """
-    term = ' '.join(str(term or '').split())[:128]
+    term = canonical_catalogue_term(term)
     if not term:
         return []
     lowered = term.casefold()
+    dsa_query = is_dsa_catalogue_term(term)
+    browse_all = lowered in {"all books", "all available books"}
     tokens = [token for token in re.findall(r'[a-z0-9+#.]+', lowered)
               if len(token) > 1 and token not in {
-                  'the', 'and', 'for', 'book', 'books', 'learning', 'college', 'library'
+                  'the', 'and', 'for', 'book', 'books', 'learning', 'college', 'library', 'all',
+                  'data', 'structures', 'algorithms'
               }][:10]
     searchable = (Book.title, Book.author, Book.isbn, Book.category, Book.description)
-    clauses = [column.icontains(term, autoescape=True) for column in searchable]
-    for token in tokens:
-        clauses.extend(column.icontains(token, autoescape=True) for column in searchable)
-        clauses.append(Book.id.in_(select(BookDepartment.book_id).where(
-            BookDepartment.department_code.ilike(token))))
-    rows = db.query(Book).filter(Book.is_active.is_(True), or_(*clauses)).limit(60).all()
+    if dsa_query:
+        # Match the canonical subject only.  In particular, do not turn a DSA
+        # request into an unqualified catalogue browse when no match exists.
+        clauses = [column.icontains(keyword, autoescape=True)
+                   for keyword in _DSA_TERMS for column in searchable]
+    elif browse_all:
+        clauses = []
+    else:
+        clauses = [column.icontains(term, autoescape=True) for column in searchable]
+        for token in tokens:
+            clauses.extend(column.icontains(token, autoescape=True) for column in searchable)
+            clauses.append(Book.id.in_(select(BookDepartment.book_id).where(
+                BookDepartment.department_code.ilike(token))))
+    query = db.query(Book).filter(Book.is_active.is_(True))
+    if available_only:
+        query = query.filter(Book.available_copies > 0)
+    if clauses:
+        query = query.filter(or_(*clauses))
+    rows = query.limit(60).all()
 
     def score(book):
         values = {
@@ -140,12 +175,34 @@ def assistant_catalogue_search(db, term, limit=12):
             'isbn': (book.isbn or '').casefold(), 'category': (book.category or '').casefold(),
             'description': (book.description or '').casefold(),
         }
+        if dsa_query:
+            subject_values = (values['title'], values['category'], values['description'])
+            data_structures = any("data structures" in value for value in subject_values)
+            algorithms = any("algorithm" in value for value in subject_values)
+            if not (data_structures or algorithms):
+                return 0
+            # Canonical title/category matches outrank partial subject and
+            # author matches, making the top recommendation explainable.
+            exact = 1200 if lowered in {values['title'], values['category']} else 0
+            title_score = (700 if "data structures and algorithms" in values['title'] else 0)
+            title_score += (520 if "data structures" in values['title'] else 0)
+            title_score += (420 if "algorithm" in values['title'] else 0)
+            category_score = (350 if "data structures" in values['category'] else 0)
+            category_score += (260 if "algorithm" in values['category'] else 0)
+            keyword_score = (100 if data_structures else 0) + (80 if algorithms else 0)
+            return exact + title_score + category_score + keyword_score
         exact = 1000 if lowered in {values['title'], values['isbn']} else 0
         contains = (300 if lowered in values['title'] else 0) + (220 if lowered in values['author'] else 0)
         contains += (180 if lowered in values['category'] else 0) + (80 if lowered in values['description'] else 0)
         coverage = sum(30 for token in tokens if any(token in value for value in values.values()))
         return exact + contains + coverage
 
+    # Generic department matches are intentionally retained: their score may
+    # be zero because the department code is held in BookDepartment rather
+    # than on Book. Canonical DSA results, however, must always have direct
+    # indexed subject evidence.
+    if dsa_query:
+        rows = [book for book in rows if score(book) > 0]
     rows.sort(key=lambda book: (-score(book), book.title.casefold(), book.id))
     result = []
     for book in rows[:limit]:

@@ -1,6 +1,7 @@
 """Grounded, private, read-only catalogue support in assistant chat."""
 import asyncio
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ from backend.app.agents import tools
 from backend.app.api.schemas import ChatResponse
 from backend.app.main import app
 from backend.app.models import Book, BookDepartment, Department, User
+from backend.app.library.service import canonical_catalogue_term
 from test_read_only_chat import _headers
 
 
@@ -24,6 +26,14 @@ BOOKS = (
     ("9780134685991", "Effective Java", "Joshua Bloch", "Java", 5, 3, True, ["CSE"]),
     ("9781718504103", "Eloquent JavaScript", "Marijn Haverbeke", "JavaScript", 4, 2, True, ["CSE"]),
     ("9781491910771", "Head First Java", "Kathy Sierra", "Java", 6, 4, True, ["CSE"]),
+    ("9780000000110", "Data Structures and Algorithms", "Narasimha Karumanchi", "Data Structures and Algorithms", 5, 3, True, ["CSE"]),
+    ("9780000000111", "Introduction to Algorithms", "Thomas H. Cormen", "Algorithms", 4, 2, True, ["CSE"]),
+    ("9780000000112", "Algorithm Analysis", "Michael Goodrich", "Algorithms", 3, 0, True, ["CSE"]),
+    ("9780000000113", "Android Development", "Android Author", "Mobile Development", 4, 4, True, ["CSE"]),
+    ("9780000000114", "Probability Essentials", "Stats Author", "Mathematics", 4, 4, True, ["CSE"]),
+    ("9780000000115", "Computer Networking", "Network Author", "Networking", 4, 4, True, ["CSE"]),
+    ("9780000000116", "CSS in Depth", "CSS Author", "Web Development", 4, 4, True, ["CSE"]),
+    ("9780000000117", "Civil Engineering Materials", "Civil Author", "Civil Engineering", 4, 4, True, ["CSE"]),
 )
 
 
@@ -67,6 +77,14 @@ def test_student_capabilities_advertise_library_prompts_only_to_students():
     ]
     assert all(group["label"] != "Library catalogue" for group in
                tools.assistant_capabilities("faculty")["suggestion_groups"])
+
+
+@pytest.mark.parametrize("alias", [
+    "dsa", "data structure", "data structures", "algorithm", "algorithms",
+    "data structures and algorithms",
+])
+def test_dsa_subject_aliases_are_canonicalized(alias):
+    assert canonical_catalogue_term(alias) == "Data Structures and Algorithms"
 
 
 def test_exact_title_availability_is_deterministic_and_safe(agents, db, library_catalogue,
@@ -149,6 +167,64 @@ def test_ollama_timeout_returns_deterministic_available_results(
     assert result["source_label"] == "Library catalogue result"
     assert result["fallback_code"] == "timeout"
     assert "Python Crash Course" in result["text"]
+    assert "Learning Python" not in result["text"]
+
+
+@pytest.mark.parametrize("question", [
+    "can u suggest me a book for dsa in library which is available",
+    "Suggest a DSA book available in the library",
+    "Recommend a book for data structures",
+    "Find available algorithms books",
+    "Do you have a book on algorithm analysis?",
+])
+def test_dsa_aliases_return_only_live_relevant_catalogue_books(
+        question, agents, db, library_catalogue, monkeypatch):
+    async def unavailable(*_args, **_kwargs):
+        return llm.OllamaResult(error_code="unavailable")
+    monkeypatch.setattr(llm, "chat_async", unavailable)
+    result = ask(agents, db, question)
+    books = result["data"]["books"]
+    assert books
+    assert all(book["available_copies"] > 0 for book in books)
+    assert all(any(keyword in f"{book['title']} {book['category']}".casefold()
+                   for keyword in ("data structures", "algorithm")) for book in books)
+    titles = {book["title"] for book in books}
+    assert {"Android Development", "Probability Essentials", "Computer Networking",
+            "CSS in Depth", "Civil Engineering Materials"}.isdisjoint(titles)
+    assert "Data Structures and Algorithms" in result["text"]
+    if re.search(r"\b(?:suggest|recommend)\b|book on", question, re.I):
+        assert result["actions"][0]["route"] == "/student/library?q=Data%20Structures%20and%20Algorithms"
+
+
+def test_dsa_no_available_match_is_specific_and_never_browses_catalogue(
+        agents, db, library_catalogue, monkeypatch):
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("no-match DSA lookup reached an LLM")
+    monkeypatch.setattr(llm, "chat_async", forbidden)
+    for book in library_catalogue:
+        if "data structures" in f"{book.title} {book.category}".casefold() or "algorithm" in f"{book.title} {book.category}".casefold():
+            book.available_copies = 0
+    db.flush()
+    result = ask(agents, db, "Suggest a DSA book available in the library")
+    assert result["text"] == "No currently available catalogue books matched Data Structures and Algorithms."
+    assert result["data"]["books"] == []
+    assert "Android Development" not in result["text"]
+
+
+@pytest.mark.parametrize("question, expected", [
+    ("Show available Python books", "Python Crash Course"),
+    ("Find available AIML books", "Machine Learning Engineering"),
+    ("Show all available books", "Android Development"),
+])
+def test_available_catalogue_filters_before_ranking(question, expected, agents, db,
+                                                     library_catalogue, monkeypatch):
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("availability catalogue lookup reached an LLM")
+    monkeypatch.setattr(llm, "chat_async", forbidden)
+    result = ask(agents, db, question)
+    assert expected in result["text"]
+    assert result["data"]["books"]
+    assert all(book["available_copies"] > 0 for book in result["data"]["books"])
     assert "Learning Python" not in result["text"]
 
 

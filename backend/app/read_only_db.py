@@ -332,8 +332,8 @@ _INTENT_PATTERNS: tuple[tuple[AllowedIntent, tuple[str, ...]], ...] = (
         r"what did i miss", r"recent notifications?",
     )),
     (AllowedIntent.get_visible_campus_events, (r"campus events?", r"college events?", r"upcoming events?")),
-    (AllowedIntent.search_library_catalogue, (r"search.*library", r"find .*books?", r"library catalogue", r"books? (?:about|by)")),
     (AllowedIntent.get_library_book_availability, (r"book.*available", r"availability.*book", r"available.*book")),
+    (AllowedIntent.search_library_catalogue, (r"search.*library", r"find .*books?", r"library catalogue", r"books? (?:about|by)")),
 )
 
 
@@ -449,7 +449,7 @@ def classify_deterministic(message: str) -> AllowedIntentRequest | None:
         return None
     # Recommendations retain the existing bounded catalogue-assistant path,
     # which may send only its sanitized catalogue projection to the provider.
-    if re.search(r"\brecommend\w*\b", text):
+    if re.search(r"\b(?:recommend|suggest)\w*\b", text):
         return None
     analytics = _classify_analytics(message)
     if analytics is not None:
@@ -471,9 +471,12 @@ def classify_deterministic(message: str) -> AllowedIntentRequest | None:
 
 
 def _library_term(message: str) -> str:
+    from .library.service import canonical_catalogue_term
+    if re.search(r"\bshow\s+all\s+available\s+books?\b", message, re.I):
+        return "all available books"
     value = re.sub(r"\b(?:search|find|show|check|is|the|a|an|book|books|library|catalogue|catalogue|available|availability|for|in|college)\b", " ", message, flags=re.I)
     value = re.sub(r"\s+", " ", value).strip(" ?.!\t\n")
-    return value[:128] or message[:128]
+    return canonical_catalogue_term(value[:128] or message[:128])
 
 
 def _safe_denial() -> dict:
@@ -1426,9 +1429,9 @@ def execute(db, agents, user, request: AllowedIntentRequest) -> dict:
     if intent in {AllowedIntent.search_library_catalogue, AllowedIntent.get_library_book_availability}:
         if not params.query:
             return {"books": []}
-        books = agents["library_agent"].search_catalogue(db, params.query, limit=min(params.limit, 50))
-        if intent == AllowedIntent.get_library_book_availability:
-            books = [book for book in books if book.get("available_copies", 0) > 0][:params.limit]
+        books = agents["library_agent"].search_catalogue(
+            db, params.query, limit=min(params.limit, 50),
+            available_only=intent == AllowedIntent.get_library_book_availability)
         return {"books": [{key: book[key] for key in (
             "title", "author", "isbn", "publisher", "category", "description",
             "total_copies", "available_copies", "availability_status", "departments") if key in book}
