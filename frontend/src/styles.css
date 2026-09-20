@@ -29,8 +29,24 @@
   .card :where(p, h2, h3, td, th, span, a) { overflow-wrap: anywhere; }
   .card :where(.flex) > * { min-width: 0; }
   .card :where(.inline-flex) { max-width: 100%; }
+  .assistant-shell { min-height: 560px; }
+  .assistant-hidden-suggestions { display: none; }
+  .assistant-suggestions-trigger { display: inline-flex; }
+  .assistant-suggestions-sheet { display: flex; align-items: center; justify-content: center; }
 
   @media (max-width: 639px) {
     .btn { min-height: 44px; }
+  }
+
+  @media (max-width: 767px) {
+    .assistant-page-header > div { margin-bottom: 0.75rem; }
+    .assistant-page-header .text-muted { display: none; }
+    .assistant-shell { min-height: 0 !important; height: calc(100dvh - 10rem); }
+    .assistant-shell > div[aria-live] { height: 0; padding: 0.875rem; }
+    .assistant-clear { flex: 0 0 auto; min-width: 44px; padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
+    .assistant-clear-label { display: none; }
+    .assistant-suggestions-sheet { align-items: flex-end; }
+    .assistant-composer { padding: 0.75rem; padding-bottom: calc(0.75rem + env(safe-area-inset-bottom)); }
+    .assistant-composer .field { min-width: 0; }
   }
 }

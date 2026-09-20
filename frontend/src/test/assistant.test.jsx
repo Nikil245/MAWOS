@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
@@ -129,5 +129,31 @@ describe('academic assistant response contract', () => {
       { username: 'student.one', role: 'student' }, 'assistant')) || '';
     expect(stored).not.toContain('Show my marks');
     expect(stored).not.toContain('database password');
+  });
+
+  it('keeps quick prompts hidden by default and submits a selected suggestion from the shared panel', async () => {
+    api.assistantCapabilities.mockResolvedValue({
+      ...capability,
+      suggestion_groups: [
+        { label: 'My records', prompts: ['What is my attendance?'] },
+        { label: 'Library catalogue', prompts: ['Find introductory data science books'] },
+      ],
+    });
+    api.chat.mockResolvedValue({ text: 'Your attendance is 82%.', mode: 'lexicon', routing });
+    const { container } = await renderAssistant();
+
+    expect(container.querySelector('.assistant-hidden-suggestions')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /suggestions/i })).not.toBeInTheDocument();
+    const trigger = screen.getByRole('button', { name: /suggestions/i });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(trigger);
+    const sheet = screen.getByRole('dialog', { name: /suggestions/i });
+    expect(within(sheet).getByText('My records')).toBeInTheDocument();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'What is my attendance?' }));
+
+    expect(screen.queryByRole('dialog', { name: /suggestions/i })).not.toBeInTheDocument();
+    expect(api.chat).toHaveBeenCalledWith('token', 'What is my attendance?', expect.any(AbortSignal), null, []);
+    expect(await screen.findByText('Your attendance is 82%.')).toBeInTheDocument();
   });
 });

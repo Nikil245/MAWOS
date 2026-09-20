@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, Send, Trash2 } from 'lucide-react';
+import { Bot, Lightbulb, Send, Trash2, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api, isAbortError } from '../../services/api';
 import { PageHeader } from '../../components/ui';
@@ -51,6 +51,19 @@ const EMPTY_CONVERSATION = { messages: [], contextTopic: null, conversationConte
 
 function AssistantLoading() {
   return <main className="p-6"><p className="text-sm text-muted">Preparing your assistant…</p></main>;
+}
+
+function SuggestionGroups({ groups = [], fallback = false, busy, onSelect }) {
+  const visibleGroups = fallback
+    ? [...groups, { label: 'General help', prompts: SAFE_GENERAL_PROMPTS }]
+    : groups;
+  return <>{visibleGroups.map((group) => <div key={group.label}>
+    <p className="mb-1 text-xs font-semibold text-muted">{group.label}</p>
+    <div className="flex flex-wrap gap-2">{group.prompts.map((prompt) => <button
+      key={prompt} type="button" disabled={busy} onClick={() => onSelect(prompt)}
+      className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-700 hover:bg-blue-50"
+    >{prompt}</button>)}</div>
+  </div>)}</>;
 }
 
 function isCapabilityResponse(value, expectedRole) {
@@ -290,6 +303,7 @@ function AssistantConversation({ token, user, accountKey }) {
   }, [accountKey, retryVersion, token, user.role]);
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [loadingText, setLoadingText] = useState('Preparing your answer…');
   const append = (message) => setConversation((current) => ({
     messages: [
@@ -324,9 +338,9 @@ function AssistantConversation({ token, user, accountKey }) {
     conversationContext.current = next;
   };
 
-  const send = async (event) => {
-    event.preventDefault();
-    const text = value.trim();
+  const send = async (event, suggestedText = null) => {
+    event?.preventDefault();
+    const text = (suggestedText ?? value).trim();
     if (!text || busy || submitting.current || (capabilityState.status === 'loading')) return;
     submitting.current = true;
     append({ role: 'user', text });
@@ -404,17 +418,22 @@ function AssistantConversation({ token, user, accountKey }) {
     (message) => message.role === 'agent' && message.candidateContext,
   )?.candidates || [];
 
+  const chooseSuggestion = (prompt) => {
+    setSuggestionsOpen(false);
+    send(null, prompt);
+  };
+
   return <>
-    <PageHeader title={capability?.title || 'Academic assistant'} eyebrow="MAWOS / Role-scoped agent conversation">
-      <p className="mt-1 text-sm text-muted">{capability?.description || 'Loading your authorized assistant scope…'}</p>
-    </PageHeader>
-    <section className="card mx-auto flex max-w-4xl flex-col overflow-hidden p-0" style={{ minHeight: '560px' }}>
+    <div className="assistant-page-header"><PageHeader title={capability?.title || 'Academic assistant'} eyebrow="MAWOS / Role-scoped agent conversation">
+      <p className="assistant-page-description mt-1 text-sm text-muted">{capability?.description || 'Loading your authorized assistant scope…'}</p>
+    </PageHeader></div>
+    <section className="assistant-shell card mx-auto flex max-w-4xl flex-col overflow-hidden p-0">
       <div className="flex items-center gap-3 border-b p-4">
         <span className="rounded-lg bg-blue-50 p-2 text-primary"><Bot size={20} /></span>
         <div className="min-w-0 flex-1"><p className="font-semibold">{capability?.title || 'Academic assistant'}</p><p className="text-xs text-muted">{capability?.subtitle || 'Loading authorized capabilities'}</p></div>
-        <button type="button" className="btn-secondary !px-3" disabled={busy || !messages.some((message) => message.role === 'user')} onClick={clearConversation}><Trash2 size={16} />Clear conversation</button>
+        <button type="button" className="assistant-clear btn-secondary !px-3" disabled={busy || !messages.some((message) => message.role === 'user')} onClick={clearConversation}><Trash2 size={16} /><span className="assistant-clear-label">Clear conversation</span></button>
       </div>
-      <div className="flex-1 space-y-4 overflow-auto p-4 sm:p-5" aria-live="polite">
+      <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4 sm:p-5" aria-live="polite">
         {capabilityState.status === 'loading' && <div aria-live="polite" className="text-sm text-muted">Loading your authorized assistant scope…</div>}
         {capabilityFailed && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">Assistant capabilities are temporarily unavailable. You can still ask general academic or MAWOS questions.<button type="button" className="ml-2 font-semibold underline" onClick={retryCapabilities}>Retry</button></div>}
         {messages.map((message) => message.role === 'user'
@@ -432,29 +451,25 @@ function AssistantConversation({ token, user, accountKey }) {
           <div className="flex flex-wrap gap-2">{[
             'Which is best for a beginner?', 'Compare these books', 'Check availability',
           ].map((prompt) => <button key={prompt} type="button" disabled={busy}
-            onClick={() => setValue(prompt)} className="rounded-lg bg-blue-50 px-2 py-1 text-xs text-primary hover:bg-blue-100"
+            onClick={() => chooseSuggestion(prompt)} className="rounded-lg bg-blue-50 px-2 py-1 text-xs text-primary hover:bg-blue-100"
           >{prompt}</button>)}</div>
         </div>}
-        {capability?.suggestion_groups.map((group) => <div key={group.label}>
-          <p className="mb-1 text-xs font-semibold text-muted">{group.label}</p>
-          <div className="flex flex-wrap gap-2">{group.prompts.map((prompt) => <button
-            key={prompt} type="button" disabled={busy} onClick={() => setValue(prompt)}
-            className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-700 hover:bg-blue-50"
-          >{prompt}</button>)}</div>
-        </div>)}
-        {capabilityFailed && <div>
-          <p className="mb-1 text-xs font-semibold text-muted">General help</p>
-          <div className="flex flex-wrap gap-2">{SAFE_GENERAL_PROMPTS.map((prompt) => <button
-            key={prompt} type="button" disabled={busy} onClick={() => setValue(prompt)}
-            className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-700 hover:bg-blue-50"
-          >{prompt}</button>)}</div>
-        </div>}
+        <div className="assistant-hidden-suggestions"><SuggestionGroups groups={capability?.suggestion_groups} fallback={capabilityFailed} busy={busy} onSelect={setValue} /></div>
+        <button type="button" className="assistant-suggestions-trigger btn-secondary w-full" aria-expanded={suggestionsOpen} aria-controls="assistant-suggestions" onClick={() => setSuggestionsOpen(true)} disabled={busy}>
+          <Lightbulb size={17} />Suggestions
+        </button>
       </div>
-      <form className="flex gap-2 border-t p-4" onSubmit={send}>
+      <form className="assistant-composer flex min-w-0 gap-2 border-t p-4" onSubmit={send}>
         <label className="sr-only" htmlFor="chat">Ask a question</label>
         <input id="chat" className="field" disabled={!canUseChat} value={value} onChange={(event) => setValue(event.target.value)} placeholder={capability?.input_placeholder || (capabilityFailed ? 'Ask a general academic or MAWOS question…' : 'Loading authorized capabilities…')} />
         <button aria-label="Send message" className="btn-primary" disabled={busy || !canUseChat}><Send size={18} /></button>
       </form>
     </section>
+    {suggestionsOpen && <div className="assistant-suggestions-sheet fixed inset-0 z-40 bg-slate-950/40 p-3" role="dialog" aria-modal="true" aria-labelledby="assistant-suggestions-title" onClick={() => setSuggestionsOpen(false)}>
+      <section id="assistant-suggestions" className="max-h-[75dvh] w-full overflow-y-auto rounded-2xl bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl sm:max-w-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between gap-3"><div><h2 id="assistant-suggestions-title" className="font-semibold">Suggestions</h2><p className="text-xs text-muted">Choose a prompt to send.</p></div><button type="button" className="btn-secondary !min-h-0 !p-2" aria-label="Close suggestions" onClick={() => setSuggestionsOpen(false)}><X size={18} /></button></div>
+        <div className="space-y-4"><SuggestionGroups groups={capability?.suggestion_groups} fallback={capabilityFailed} busy={busy} onSelect={chooseSuggestion} /></div>
+      </section>
+    </div>}
   </>;
 }
