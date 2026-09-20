@@ -13,7 +13,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .. import ai_provider, config, llm, metrics
@@ -26,6 +26,9 @@ from ..models import (Department, HallTicket, Notification, ScholarshipAssessmen
                       TeachingAssignment, User, Faculty, Scholarship,
                       ScholarshipApplication, utcnow)
 from .. import scholarships
+from ..bus import bus
+from ..coverage import service as coverage_service
+from ..coverage.schemas import AttendanceSubmission
 from ..notifications import mark_read, owned_query
 from ..marks_policy import INTERNALS, MAX_MARKS, assessments
 from .schemas import (
@@ -449,15 +452,6 @@ def class_roster(dept: str, year: int, section: str,
         db, dept, year, section)}
 
 
-class AttendanceSheet(BaseModel):
-    dept: str
-    year: int
-    section: str
-    subject_code: str
-    date: str
-    absent_usns: list[str] = []
-
-
 def _can_access_class(db, user, dept: str, year: int, section: str) -> bool:
     if user.role == "admin":
         return True
@@ -470,32 +464,30 @@ def _can_access_class(db, user, dept: str, year: int, section: str) -> bool:
     return False
 
 
-def _owns_assignment(db, user, sheet: AttendanceSheet) -> bool:
-    if user.role in ("admin",):
-        return True
-    return db.query(TeachingAssignment).filter_by(
-        faculty_id=user.faculty_id, subject_code=sheet.subject_code.upper(),
-        dept_code=sheet.dept.upper(), year=sheet.year,
-        section=sheet.section.upper()).first() is not None
-
-
 @router.post("/faculty/attendance")
-async def mark_attendance(sheet: AttendanceSheet,
-                          user: User = Depends(require_role("faculty", "hod", "admin")),
+async def mark_attendance(sheet: AttendanceSubmission,
+                          user: User = Depends(require_role("faculty", "hod")),
                           db: Session = Depends(get_session)):
-    """Mark a whole class in one call: everyone present except absent_usns."""
-    if not _owns_assignment(db, user, sheet):
-        raise HTTPException(status_code=403,
-                            detail="You are not assigned to this subject-section")
-    roster = db.query(Student).filter_by(dept_code=sheet.dept.upper(),
-                                         year=sheet.year,
-                                         section=sheet.section.upper()).all()
-    absent = {u.upper().strip() for u in sheet.absent_usns}
-    records = [{"usn": s.usn, "subject_code": sheet.subject_code.upper(),
-                "date": sheet.date, "present": s.usn not in absent}
-               for s in roster]
-    return await get_agents()["attendance_agent"].upload_attendance(
-        db, user.username, records)
+    """Submit the server roster for one authorized published occurrence."""
+    try:
+        result, events = coverage_service.submit_attendance(db, user, sheet)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Attendance was already submitted; a correction workflow is not available.",
+        ) from None
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=409,
+                            detail="Attendance data changed; refresh and retry.") from None
+    for topic, payload in events:
+        await bus.publish(topic, payload, source_agent="coverage_service")
+    return result
 
 
 class MarkEntry(BaseModel):

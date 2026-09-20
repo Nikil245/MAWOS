@@ -36,6 +36,7 @@ import { defaultRouteByRole } from "./routes/roleRoutes";
 import { AdminCampusEvents, EventDetail, EventsList } from "./pages/shared/CampusEvents";
 import ParentManagement from "./pages/admin/ParentManagement";
 import { ParentDashboard, ParentNotifications, ParentTimetable } from "./pages/parent/ParentPortal";
+import { CoverageEscalations, CoverageQueue, FacultyCoverage } from "./pages/coverage/Coverage";
 
 function HomeRedirect() {
   const { user } = useAuth();
@@ -93,6 +94,7 @@ export default function App() {
             <Route element={<RoleRoute roles={["faculty", "hod"]} />}>
               <Route path="faculty" element={<FacultyDashboard />} />
               <Route path="faculty/timetable" element={<FacultyTimetable />} />
+              <Route path="faculty/coverage" element={<FacultyCoverage />} />
             </Route>
             <Route element={<RoleRoute roles={["faculty"]} />}>
               <Route
@@ -104,6 +106,7 @@ export default function App() {
               <Route path="hod" element={<HodDashboard />} />
               <Route path="hod/timetable" element={<HodTimetable />} />
               <Route path="hod/scholarships" element={<HodScholarships />} />
+              <Route path="hod/coverage" element={<CoverageQueue />} />
             </Route>
             <Route element={<RoleRoute roles={["principal", "admin"]} />}>
               <Route path="principal" element={<PrincipalDashboard />} />
@@ -111,6 +114,7 @@ export default function App() {
                 path="principal/timetable"
                 element={<PrincipalTimetable />}
               />
+              <Route path="coverage/escalations" element={<CoverageEscalations />} />
             </Route>
             <Route element={<RoleRoute roles={["admin"]} />}>
               <Route path="admin" element={<AdminDashboard />} />

@@ -181,9 +181,14 @@ class MarksRecord(Base):
 
 class AttendanceRecord(Base):
     __tablename__ = "attendance_records"
-    __table_args__ = (UniqueConstraint("usn", "subject_code", "date",
-                                       name="uq_attendance_entry"),)
+    __table_args__ = (
+        UniqueConstraint("attendance_sheet_id", "usn", name="uq_attendance_sheet_student"),
+        Index("uq_attendance_legacy_entry", "usn", "subject_code", "date", unique=True,
+              postgresql_where=text("attendance_sheet_id IS NULL"),
+              sqlite_where=text("attendance_sheet_id IS NULL")),
+    )
     id = Column(Integer, primary_key=True)
+    attendance_sheet_id = Column(Integer, ForeignKey("attendance_sheets.id"), nullable=True, index=True)
     usn = Column(String(16), ForeignKey("students.usn"), nullable=False, index=True)
     subject_code = Column(String(16), ForeignKey("subjects.code"), nullable=False)
     date = Column(Date, nullable=False)
@@ -444,3 +449,6 @@ from .timetable import models as timetable_models  # noqa: E402,F401
 # Library metadata shares the existing migration/session infrastructure.
 from .library.models import (Book, BookDepartment, BookReservation, BookIssue, LibraryFine,
                              BookReview, LibrarianAccount)  # noqa: E402,F401
+
+# Operational absence/coverage tables are additive and keep legacy attendance nullable.
+from .coverage import models as coverage_models  # noqa: E402,F401

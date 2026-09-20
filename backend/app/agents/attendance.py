@@ -68,14 +68,18 @@ class AttendanceAgent(BaseAgent):
     async def on_attendance_uploaded(self, payload: dict):
         db = self.session()
         try:
-            updates = [self._recompute_student(db, usn)
-                       for usn in payload.get("usns", [])]
+            usns = payload.get("usns", [])
+            if payload.get("attendance_sheet_id"):
+                usns = [usn for usn, in db.query(AttendanceRecord.usn).filter_by(
+                    attendance_sheet_id=payload["attendance_sheet_id"]).distinct().all()]
+            updates = [self._recompute_student(db, usn) for usn in usns]
             db.commit()
         finally:
             db.close()
         await self.publish("attendance.updated", {
             "workflow_id": payload["workflow_id"],
-            "_hop": payload.get("_hop", 1), "updates": updates})
+            "_hop": payload.get("_hop", 1), "updates": updates,
+            "_privacy_safe_log": bool(payload.get("_privacy_safe_log"))})
 
     def _recompute_student(self, db, usn: str) -> dict:
         attended_expr = func.sum(case((AttendanceRecord.present.is_(True), 1), else_=0))

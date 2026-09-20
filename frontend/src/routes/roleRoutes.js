@@ -16,10 +16,10 @@ export const scholarshipRouteByRole = {
 
 const allowedPaths = {
   student: ['/student/library', '/events', '/student/placements', '/student', '/student/timetable', '/student/scholarships', '/assistant', '/system'],
-  faculty: ['/events', '/faculty', '/faculty/timetable', '/faculty/scholarships', '/assistant', '/system'],
-  hod: ['/events', '/hod/timetable', '/faculty/timetable', '/hod', '/hod/scholarships', '/faculty', '/assistant', '/system'],
-  principal: ['/events', '/principal/timetable', '/principal', '/assistant', '/system'],
-  admin: ['/admin/library', '/admin/librarians', '/admin/parents', '/events', '/admin/events', '/admin/placements', '/admin/timetable', '/principal/timetable', '/admin', '/principal', '/assistant', '/system'],
+  faculty: ['/events', '/faculty', '/faculty/timetable', '/faculty/coverage', '/faculty/scholarships', '/assistant', '/system'],
+  hod: ['/events', '/hod/timetable', '/faculty/timetable', '/hod/coverage', '/faculty/coverage', '/hod', '/hod/scholarships', '/faculty', '/assistant', '/system'],
+  principal: ['/events', '/principal/timetable', '/coverage/escalations', '/principal', '/assistant', '/system'],
+  admin: ['/admin/library', '/admin/librarians', '/admin/parents', '/events', '/admin/events', '/admin/placements', '/admin/timetable', '/principal/timetable', '/coverage/escalations', '/admin', '/principal', '/assistant', '/system'],
   librarian: ['/librarian/library'],
   parent: ['/parent', '/parent/timetable', '/parent/notifications'],
 };

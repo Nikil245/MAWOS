@@ -27,17 +27,25 @@ class EventBus:
         self._subscribers: dict[str, list[tuple[str, Handler]]] = defaultdict(list)
         # workflow_id -> monotonic start time, used to compute per-hop elapsed ms
         self._workflow_start: dict[str, float] = {}
+        self._privacy_safe_workflows: set[str] = set()
 
     def subscribe(self, topic: str, agent_name: str, handler: Handler) -> None:
         self._subscribers[topic].append((agent_name, handler))
 
     def _log(self, workflow_id: str, topic: str, agent: str, hop: int,
              payload: dict, elapsed_ms: float) -> None:
+        stored_payload = payload
+        if workflow_id in self._privacy_safe_workflows or payload.get("_privacy_safe_log"):
+            # Handlers retain the full in-process event for established
+            # deterministic cascades, while the durable audit log contains no
+            # roster/student identity list.
+            stored_payload = {key: value for key, value in payload.items()
+                              if key not in {"usns", "updates", "results"}}
         db = SessionLocal()
         try:
             db.add(WorkflowEvent(
                 workflow_id=workflow_id, topic=topic, agent=agent, hop=hop,
-                payload=json.dumps(payload, default=str)[:2000],
+                payload=json.dumps(stored_payload, default=str)[:2000],
                 elapsed_ms=round(elapsed_ms, 2),
             ))
             db.commit()
@@ -52,6 +60,8 @@ class EventBus:
         """
         workflow_id = payload.get("workflow_id") or str(uuid.uuid4())
         payload = {**payload, "workflow_id": workflow_id}
+        if payload.get("_privacy_safe_log"):
+            self._privacy_safe_workflows.add(workflow_id)
 
         if workflow_id not in self._workflow_start:
             self._workflow_start[workflow_id] = time.perf_counter()
@@ -77,6 +87,7 @@ class EventBus:
         # Root publisher cleans up the start marker once the cascade returns.
         if hop == 0:
             self._workflow_start.pop(workflow_id, None)
+            self._privacy_safe_workflows.discard(workflow_id)
         return workflow_id
 
 

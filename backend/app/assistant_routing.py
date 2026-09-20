@@ -30,6 +30,8 @@ DISALLOWED = re.compile(
     r"|\b(?:ignore|override|bypass|disregard)\b.{0,70}\b(?:instructions?|rules?|system|permissions?|authorization)\b"
     r"|\b(?:system prompt|developer message|hidden (?:prompt|configuration)|jailbreak|reveal (?:your )?(?:tools?|instructions?)|pretend you are (?:an? )?(?:admin|administrator))\b"
     r"|\b(?:change|modify|update|delete|insert|alter|set|increase|reduce|waive|clear|pay|approve|unblock|mark)\b.{0,45}\b(?:my|the|student|marks?|attendance|fees?|fines?|eligibility|records?|paid|present)\b"
+    r"|\b(?:approve|reject|assign|select|accept|decline|cancel|submit|create|mark|choose|recommend)\b.{0,60}\b(?:faculty )?(?:absence|leave|coverage|substitute|replacement)\b"
+    r"|\b(?:absence notes?|coverage candidates?|eligible substitutes?)\b"
     r"|\b(?:diagnose me|prescribe|which medication should i|medical advice|legal advice|should i (?:buy|sell|invest)|suicid\w*|emergency)\b"
     r"|\bdecode\b.{0,20}\btoken\b"
     r"|\b(?:run|execute|launch)\b.{0,35}\b(?:shell|terminal|command|application|sql)\b"

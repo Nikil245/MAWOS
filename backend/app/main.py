@@ -88,3 +88,5 @@ def service_status():
 
 from .library.api import router as library_router
 app.include_router(library_router)
+from .coverage.api import router as coverage_router
+app.include_router(coverage_router)
