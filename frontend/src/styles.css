@@ -4,16 +4,33 @@
 
 @layer base {
   * { @apply border-line; }
-  body { @apply min-h-screen bg-canvas font-sans text-slate-900 antialiased; }
+  html, body, #root { @apply min-h-screen; }
+  body { @apply min-h-screen overflow-x-hidden bg-canvas font-sans text-slate-900 antialiased; }
   button, input, select, textarea { font: inherit; }
   button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { @apply outline-none ring-2 ring-primary ring-offset-2; }
 }
 
 @layer components {
-  .card { @apply rounded-xl border bg-white p-5 shadow-card; }
+  .card { @apply min-w-0 rounded-xl border bg-white p-4 shadow-card sm:p-5; }
   .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50; }
   .btn-primary { @apply btn bg-primary text-white hover:bg-blue-700; }
   .btn-secondary { @apply btn border bg-white text-slate-700 hover:bg-slate-50; }
   .field { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm placeholder:text-slate-400; }
   .label { @apply mb-1.5 block text-sm font-medium text-slate-700; }
+
+  /* Dashboard children are frequently grids or flex rows.  Let their content
+     shrink and wrap before it can widen the page on narrow phones. */
+  .dashboard-grid { @apply min-w-0; }
+  .dashboard-card-header { @apply flex-wrap items-start; }
+  .stat-card-content { @apply min-w-0; }
+  .stat-card-value { @apply break-words text-xl leading-tight sm:text-2xl; }
+  .stat-card-detail { @apply break-words; }
+  .table-scroll { @apply max-w-full overflow-x-auto overscroll-x-contain; }
+  .card :where(p, h2, h3, td, th, span, a) { overflow-wrap: anywhere; }
+  .card :where(.flex) > * { min-width: 0; }
+  .card :where(.inline-flex) { max-width: 100%; }
+
+  @media (max-width: 639px) {
+    .btn { min-height: 44px; }
+  }
 }

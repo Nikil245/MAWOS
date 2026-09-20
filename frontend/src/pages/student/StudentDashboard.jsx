@@ -108,7 +108,7 @@ export default function StudentDashboard() {
           USN {profile.usn} · Year {profile.year} · Section {profile.section}
         </p>
       </PageHeader>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="dashboard-grid grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Overall attendance"
           value={`${attendance.overall}%`}
@@ -147,18 +147,18 @@ export default function StudentDashboard() {
           }
         />
       </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-3">
+      <div className="dashboard-grid mt-4 grid gap-4 xl:grid-cols-3">
         <DashboardCard title="Attendance by subject" className="xl:col-span-2">
           <div className="space-y-4">
             {attendance.subjects.map((subject) => (
               <div key={subject.subject}>
-                <div className="mb-1 flex justify-between text-sm">
-                  <span className="font-medium">{subject.subject}</span>
+                <div className="mb-1 flex min-w-0 flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between">
+                  <span className="min-w-0 break-words font-medium">{subject.subject}</span>
                   <span
                     className={
                       subject.pct < 75
-                        ? "font-semibold text-red-600"
-                        : "font-semibold text-emerald-600"
+                        ? "shrink-0 font-semibold text-red-600"
+                        : "shrink-0 font-semibold text-emerald-600"
                     }
                   >
                     {subject.attended}/{subject.held} · {subject.pct}%
@@ -197,10 +197,10 @@ export default function StudentDashboard() {
             {unpaid.length ? (
               unpaid.map((fee) => (
                 <div
-                  className="flex items-center justify-between gap-2 text-sm"
+                  className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-sm"
                   key={fee.id}
                 >
-                  <span>
+                  <span className="min-w-0 break-words">
                     {fee.type}
                     {fee.fine ? ` · fine ₹${fee.fine}` : ""}
                   </span>
@@ -224,10 +224,10 @@ export default function StudentDashboard() {
           <div className="space-y-3">
             {placements.slice(0, 3).map((drive) => (
               <div
-                className="flex items-center justify-between gap-2 border-b pb-3 last:border-0"
+                className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b pb-3 last:border-0"
                 key={drive.company}
               >
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-semibold">{drive.company}</p>
                   <p className="text-xs text-muted">
                     {drive.role} · {drive.package_lpa} LPA
@@ -243,8 +243,8 @@ export default function StudentDashboard() {
         <LibrarySummaryCard data={data.library} />
         <CampusEventsCard />
         <DashboardCard title="Internal marks" className="xl:col-span-2">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="table-scroll" tabIndex="0" aria-label="Scrollable internal marks table">
+            <table className="min-w-[560px] w-full text-sm">
               <thead className="border-b text-left text-xs uppercase text-muted">
                 <tr>
                   <th className="p-2">Subject</th>
@@ -276,9 +276,9 @@ export default function StudentDashboard() {
         <DashboardCard title="Upcoming exams">
           <div className="space-y-2">
             {exams.slice(0, 4).map((exam) => (
-              <div className="flex justify-between text-sm" key={exam.subject}>
-                <span>{exam.subject}</span>
-                <span className="text-muted">{exam.date}</span>
+              <div className="flex min-w-0 flex-col gap-1 text-sm sm:flex-row sm:justify-between" key={exam.subject}>
+                <span className="min-w-0 break-words">{exam.subject}</span>
+                <span className="shrink-0 text-muted">{exam.date}</span>
               </div>
             ))}
           </div>

@@ -9,20 +9,20 @@ export function StatusBadge({ status, children }) {
 }
 
 export function PageHeader({ title, eyebrow, actions, children }) {
-  return <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-    <div><p className="text-sm text-muted">{eyebrow || 'MAWOS / Workspace'}</p><h1 className="mt-1 text-2xl font-bold tracking-tight">{title}</h1>{children}</div>
-    {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+  return <div className="mb-6 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="min-w-0"><p className="break-words text-sm text-muted">{eyebrow || 'MAWOS / Workspace'}</p><h1 className="mt-1 break-words text-2xl font-bold tracking-tight">{title}</h1>{children}</div>
+    {actions && <div className="flex min-w-0 flex-wrap gap-2">{actions}</div>}
   </div>;
 }
 
 export function StatCard({ label, value, detail, icon: Icon, tone = 'blue' }) {
   const colors = { blue: 'bg-blue-50 text-primary', teal: 'bg-teal-50 text-teal', green: 'bg-emerald-50 text-emerald-600', amber: 'bg-amber-50 text-amber-600', red: 'bg-red-50 text-red-600' };
   const shownDetail = label === 'Scholarship' ? 'Current published scholarship workflow' : detail;
-  return <div className="card"><div className="flex items-start justify-between"><div><p className="text-sm font-medium text-muted">{label}</p><p className="mt-2 text-2xl font-bold">{value}</p></div>{Icon && <span className={`rounded-lg p-2.5 ${colors[tone]}`}><Icon size={20} /></span>}</div>{shownDetail && <p className="mt-3 text-xs text-muted">{shownDetail}</p>}</div>;
+  return <div className="card min-w-0"><div className="flex min-w-0 items-start justify-between gap-3"><div className="stat-card-content min-w-0"><p className="break-words text-sm font-medium text-muted">{label}</p><p className="stat-card-value mt-2 break-words text-xl leading-tight font-bold sm:text-2xl">{value}</p></div>{Icon && <span className={`shrink-0 rounded-lg p-2.5 ${colors[tone]}`}><Icon size={20} /></span>}</div>{shownDetail && <p className="stat-card-detail mt-3 break-words text-xs text-muted">{shownDetail}</p>}</div>;
 }
 
 export function DashboardCard({ title, action, children, className = '' }) {
-  return <section className={`card ${className}`}><div className="mb-4 flex items-center justify-between gap-3"><h2 className="font-semibold">{title}</h2>{action}</div>{children}</section>;
+  return <section className={`card min-w-0 ${className}`}><div className="dashboard-card-header mb-4 flex min-w-0 flex-wrap items-start justify-between gap-3"><h2 className="min-w-0 break-words font-semibold">{title}</h2>{action && <div className="min-w-0 shrink-0">{action}</div>}</div>{children}</section>;
 }
 
 export function LoadingSkeleton({ rows = 3 }) { return <div className="space-y-3">{Array.from({ length: rows }, (_, i) => <div key={i} className="h-14 animate-pulse rounded-lg bg-slate-100" />)}</div>; }
@@ -34,7 +34,7 @@ export function DataTable({ columns, rows, pageSize = 8, empty = 'No records fou
   const filtered = rows.filter((row) => JSON.stringify(row).toLowerCase().includes(query.toLowerCase()));
   const visible = filtered.slice(page * pageSize, page * pageSize + pageSize); const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   return <div><input aria-label="Search table" className="field mb-3 max-w-xs" placeholder="Search records…" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} />
-    <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b text-xs uppercase tracking-wide text-muted"><tr>{columns.map((c) => <th className="px-3 py-2 font-semibold" key={c.label}>{c.label}</th>)}</tr></thead><tbody>{visible.map((row, index) => <tr className="border-b last:border-0" key={row.id || row.usn || index}>{columns.map((c) => <td className="px-3 py-3" key={c.label}>{c.render ? c.render(row) : row[c.key]}</td>)}</tr>)}</tbody></table></div>
+    <div className="table-scroll" role="region" tabIndex="0" aria-label="Scrollable data table"><table className="min-w-[640px] w-full text-left text-sm"><thead className="border-b text-xs uppercase tracking-wide text-muted"><tr>{columns.map((c) => <th className="px-3 py-2 font-semibold" key={c.label}>{c.label}</th>)}</tr></thead><tbody>{visible.map((row, index) => <tr className="border-b last:border-0" key={row.id || row.usn || index}>{columns.map((c) => <td className="px-3 py-3" key={c.label}>{c.render ? c.render(row) : row[c.key]}</td>)}</tr>)}</tbody></table></div>
     {!visible.length && <EmptyState title={empty} />}{filtered.length > pageSize && <div className="mt-3 flex items-center justify-end gap-2 text-sm text-muted"><button aria-label="Previous page" className="btn-secondary !p-2" disabled={!page} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><span>{page + 1} / {pages}</span><button aria-label="Next page" className="btn-secondary !p-2" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div>}</div>;
 }
 
