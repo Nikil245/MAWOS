@@ -148,7 +148,7 @@ Current project documentation provides Linux/macOS shell commands; no separate W
 
 ## Docker
 
-Copy/configure `.env` first. Compose never runs migrations automatically. Do not migrate an unknown/live database. Do not use `docker compose down -v` unless intentionally deleting local Docker volumes.
+Copy/configure `.env` first. The backend image runs `alembic upgrade head` before FastAPI starts, so its database credentials must be allowed to apply reviewed migrations. Do not point it at an unknown/live database without reviewing the migration plan. Do not use `docker compose down -v` unless intentionally deleting local Docker volumes.
 
 ### A. Existing external local PostgreSQL
 
@@ -193,18 +193,17 @@ deterministic record and catalogue searches do not consume it.
 
 ### B. Fresh Docker PostgreSQL
 
-This is an isolated database, not a host-database copy. Set `MAWOS_DATABASE_MODE=docker`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` in `.env`; retain `MAWOS_DOCKER_DATABASE_URL` because the base Compose file requires it. A new empty PostgreSQL database is supported: run the reviewed migration explicitly before starting the backend.
+This is an isolated database, not a host-database copy. Set `MAWOS_DATABASE_MODE=docker`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` in `.env`; retain `MAWOS_DOCKER_DATABASE_URL` because the base Compose file requires it. A new empty PostgreSQL database is supported: the backend entrypoint applies the reviewed migration chain before FastAPI starts.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml config --quiet
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml build
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml up -d postgres
-docker compose -f docker-compose.yml -f docker-compose.docker-db.yml run --rm --no-deps backend alembic upgrade head
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml up -d backend frontend
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml ps
 ```
 
-The persistent volume starts empty. `alembic upgrade head` creates the reviewed MAWOS schema but never creates demo data. Existing legacy databases already stamped at the former baseline remain compatible: Alembic does not rerun the new initial revision for a database at that revision or later. Docker-mode database URLs are private to its network.
+The persistent volume starts empty. The backend entrypoint runs `alembic upgrade head`, which creates the reviewed MAWOS schema but never creates demo data. Existing legacy databases already stamped at the former baseline remain compatible: Alembic does not rerun the new initial revision for a database at that revision or later. Docker-mode database URLs are private to its network.
 
 Docker URLs: <http://localhost:3000>, <http://localhost:8000/>, and <http://localhost:8000/docs>.
 
@@ -236,8 +235,10 @@ MAWOS_AI_PROVIDER=disabled
 ```
 
 Set the frontend build variable `VITE_API_BASE_URL=https://YOUR-BACKEND.onrender.com/api`.
-Use a managed PostgreSQL database with the migration-owner credentials to run
-`alembic upgrade head` once before deploying the restricted runtime account.
+Leave Render's **Docker Command** field blank. The image entrypoint runs
+`alembic upgrade head` and then starts Uvicorn using Render's injected `PORT`.
+The configured database credentials must have permission to apply the reviewed
+migrations; Render must use the same restricted network path as the backend.
 
 ## Testing and quality checks
 

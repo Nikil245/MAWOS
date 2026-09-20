@@ -117,6 +117,10 @@ def test_runtime_ports_keep_local_defaults_and_allow_render_overrides():
     assert config["services"]["backend"]["ports"] == [{"mode": "ingress", "target": 8000, "published": "8000", "protocol": "tcp"}]
     assert config["services"]["frontend"]["ports"] == [{"mode": "ingress", "target": 8080, "published": "3000", "protocol": "tcp"}]
     assert 'PORT=8000' in (ROOT / "backend/Dockerfile").read_text()
-    assert '${PORT:-8000}' in (ROOT / "backend/Dockerfile").read_text()
+    entrypoint = (ROOT / "backend/docker-entrypoint.sh").read_text()
+    assert entrypoint.startswith("#!/bin/sh\nset -eu\n")
+    assert "alembic upgrade head" in entrypoint
+    assert 'exec uvicorn backend.app.main:app --host 0.0.0.0 --port "${PORT:-8000}"' in entrypoint
+    assert 'CMD ["/app/backend/docker-entrypoint.sh"]' in (ROOT / "backend/Dockerfile").read_text()
     assert 'ENV PORT=8080' in (ROOT / "frontend/Dockerfile").read_text()
     assert '${PORT}' in (ROOT / "frontend/nginx.conf").read_text()

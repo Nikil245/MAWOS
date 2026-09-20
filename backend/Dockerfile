@@ -20,11 +20,13 @@ COPY --chown=mawos:mawos backend ./backend
 COPY --chown=mawos:mawos alembic ./alembic
 COPY --chown=mawos:mawos alembic.ini ./
 COPY --chown=mawos:mawos ml/models ./ml/models
+RUN chmod 0555 /app/backend/docker-entrypoint.sh
 
 USER mawos
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:' + __import__('os').environ.get('PORT', '8000') + '/', timeout=3)" || exit 1
 
-# Database migrations are deliberately an explicit operator action.
-CMD ["sh", "-c", "exec uvicorn backend.app.main:app --host 0.0.0.0 --port \"${PORT:-8000}\""]
+# Run the reviewed migration chain before FastAPI starts. Keeping this in the
+# image means platforms such as Render can leave their Docker Command blank.
+CMD ["/app/backend/docker-entrypoint.sh"]
