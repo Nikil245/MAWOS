@@ -4,6 +4,7 @@ Drive locks serialize shortlist upserts and lifecycle changes. Student locks
 serialize accepted-offer checks across drives on PostgreSQL.
 """
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func
 
@@ -13,6 +14,12 @@ from . import scoring
 
 ACTIVE = ('OPEN', 'SHORTLIST_GENERATED')
 FINAL = ('OFFER_ACCEPTED', 'OFFER_DECLINED', 'REJECTED')
+BUSINESS_TIMEZONE = ZoneInfo('Asia/Kolkata')
+
+
+def placement_today() -> dt.date:
+    """Return the MAWOS business date, independent of a browser's timezone."""
+    return dt.datetime.now(BUSINESS_TIMEZONE).date()
 
 
 class PlacementError(Exception):
@@ -100,6 +107,7 @@ class PlacementService:
             if set(codes) != known:
                 raise PlacementError('Unknown department code in eligible list', 422)
         drive = self.drive(db, drive_id, lock=True) if drive_id else PlacementDrive()
+        self._validate_drive_dates(data, existing=drive if drive_id else None)
         was_open = drive_id is not None and drive.status == 'OPEN'
         if drive_id and drive.status not in ('DRAFT', 'OPEN'):
             raise PlacementError('Only DRAFT or OPEN drives may be edited')
@@ -117,6 +125,22 @@ class PlacementService:
                 events.append(('placement.drive_opened', dict(
                     drive_id=drive.id, company=drive.company, notified_count=notified)))
         return drive_record(drive)
+
+    @staticmethod
+    def _validate_drive_dates(data, existing=None):
+        """Enforce future placement dates while preserving untouched legacy rows."""
+        today = placement_today()
+        deadline_changed = existing is None or data.application_deadline != existing.application_deadline
+        drive_date_changed = existing is None or data.drive_date != existing.drive_date
+        if (data.application_deadline is not None and data.application_deadline < today
+                and deadline_changed):
+            raise PlacementError('Application deadline cannot be in the past.', 422)
+        if data.drive_date < today and drive_date_changed:
+            raise PlacementError('Drive date cannot be in the past.', 422)
+        dates_changed = existing is None or deadline_changed or drive_date_changed
+        if (dates_changed and data.application_deadline is not None
+                and data.drive_date < data.application_deadline):
+            raise PlacementError('Drive date must be on or after the application deadline.', 422)
 
     def _announce_open_drive(self, db, drive):
         departments = {code.strip().upper() for code in drive.departments.split(',') if code.strip()}

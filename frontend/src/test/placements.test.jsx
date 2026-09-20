@@ -141,6 +141,33 @@ describe("placement administration", () => {
     );
   });
 
+  it("shows date errors before submission and displays safe backend validation errors", async () => {
+    renderAt(<AdminPlacements />);
+    await screen.findByRole("cell", { name: "Example Engineer" });
+    fireEvent.change(screen.getByLabelText("Drive date"), {
+      target: { value: "2000-01-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create drive" }));
+    expect(screen.getByText("Drive date cannot be in the past.")).toBeInTheDocument();
+    expect(mocks.savePlacementDrive).not.toHaveBeenCalled();
+
+    for (const [label, value] of [
+      ["Company", "New Co"],
+      ["Role", "Developer"],
+      ["Package (LPA)", "10"],
+      ["Drive date", "2099-10-02"],
+      ["Application deadline", "2099-10-01"],
+    ])
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    mocks.savePlacementDrive.mockRejectedValueOnce(
+      new Error("Drive date must be on or after the application deadline."),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create drive" }));
+    await waitFor(() => expect(screen.getAllByText(
+      "Drive date must be on or after the application deadline.",
+    ).length).toBeGreaterThan(0));
+  });
+
   it("hides initial status while editing and provides PDF controls", async () => {
     mocks.placementDrives.mockResolvedValue([
       {

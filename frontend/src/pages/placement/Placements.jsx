@@ -24,6 +24,29 @@ const active = ["OPEN", "SHORTLIST_GENERATED"];
 const badge =
   "inline-block rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold";
 
+function businessToday() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+function placementDateErrors(form, today = businessToday()) {
+  const errors = {};
+  if (form.application_deadline && form.application_deadline < today)
+    errors.application_deadline = "Application deadline cannot be in the past.";
+  if (form.drive_date && form.drive_date < today)
+    errors.drive_date = "Drive date cannot be in the past.";
+  if (form.application_deadline && form.drive_date
+      && form.drive_date < form.application_deadline)
+    errors.drive_date = "Drive date must be on or after the application deadline.";
+  return errors;
+}
+
 function Reasons({ value }) {
   return (
     <ul className="list-disc space-y-1 pl-4">
@@ -340,6 +363,7 @@ function AdminList({ token }) {
   const [file, setFile] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [dateErrors, setDateErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState(null);
   const refresh = async () => setDrives(await api.placementDrives(token));
@@ -362,6 +386,7 @@ function AdminList({ token }) {
     setEditing(null);
     setForm({ ...emptyDrive });
     setFile(null);
+    setDateErrors({});
   }
   function editDrive(drive) {
     setEditing(drive.id);
@@ -371,6 +396,7 @@ function AdminList({ token }) {
       ),
     );
     setFile(null);
+    setDateErrors({});
   }
   async function persistDrive(body) {
     await perform(async () => {
@@ -384,6 +410,9 @@ function AdminList({ token }) {
   }
   async function saveDrive(event) {
     event.preventDefault();
+    const errors = placementDateErrors(form);
+    setDateErrors(errors);
+    if (Object.keys(errors).length) return;
     const body = {
       ...form,
       company: form.company.trim(),
@@ -503,7 +532,14 @@ function AdminList({ token }) {
               ["min_attendance", "Minimum attendance (%)", "number"],
               ["application_deadline", "Application deadline", "date"],
               ["application_url", "Official application link", "url"],
-            ].map(([name, label, type]) => (
+            ].map(([name, label, type]) => {
+              const current = form[name];
+              const today = businessToday();
+              const min = type !== "date" ? undefined : name === "drive_date"
+                ? (editing && current && current < today ? current
+                  : [today, form.application_deadline].filter(Boolean).sort().at(-1))
+                : (editing && current && current < today ? current : today);
+              return (
               <label key={name} className="text-sm">
                 {label}
                 <input
@@ -511,13 +547,25 @@ function AdminList({ token }) {
                   className="mt-1 w-full rounded border p-2"
                   type={type}
                   value={form[name]}
+                  min={min}
+                  aria-describedby={dateErrors[name] ? `${name}-error` : undefined}
                   required={
                     !["application_deadline", "application_url"].includes(name)
                   }
-                  onChange={(e) => setForm({ ...form, [name]: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...form, [name]: e.target.value };
+                    setForm(next);
+                    setDateErrors(placementDateErrors(next));
+                  }}
                 />
+                {dateErrors[name] && (
+                  <span id={`${name}-error`} role="alert" className="mt-1 block text-xs text-red-700">
+                    {dateErrors[name]}
+                  </span>
+                )}
               </label>
-            ))}
+              );
+            })}
             <label className="text-sm sm:col-span-2 lg:col-span-3">
               Job / company description
               <textarea

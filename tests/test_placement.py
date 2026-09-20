@@ -17,12 +17,12 @@ from backend.app.main import app
 from backend.app.models import Department, FeeRecord, Notification, PlacementDrive, PlacementOutcome, PlacementShortlist, Student, User
 from backend.app.placement import api, scoring
 from backend.app.placement.schemas import DriveInput, OutcomeInput
-from backend.app.placement.service import PlacementError, PlacementService, hard_failures
+from backend.app.placement.service import PlacementError, PlacementService, hard_failures, placement_today
 
 
 def drive_input(**changes):
     return DriveInput(**(dict(company='Example', role='Engineer', package_lpa=8,
-        drive_date=dt.date.today(), min_attendance=0) | changes))
+        drive_date=placement_today(), min_attendance=0) | changes))
 
 
 @pytest.fixture()
@@ -51,6 +51,24 @@ def placement_db():
 def test_drive_validation(field, value):
     with pytest.raises(ValidationError):
         drive_input(**{field: value})
+
+
+def test_placement_drive_dates_are_validated_in_business_timezone(placement_db):
+    db, _ = placement_db
+    service = PlacementService()
+    today = placement_today()
+    yesterday = today - dt.timedelta(days=1)
+    tomorrow = today + dt.timedelta(days=1)
+    with pytest.raises(PlacementError, match='Application deadline cannot be in the past'):
+        service.save_drive(db, drive_input(application_deadline=yesterday, drive_date=today))
+    with pytest.raises(PlacementError, match='Drive date cannot be in the past'):
+        service.save_drive(db, drive_input(drive_date=yesterday))
+    with pytest.raises(PlacementError, match='Drive date must be on or after'):
+        service.save_drive(db, drive_input(application_deadline=tomorrow, drive_date=today))
+    same_day = service.save_drive(db, drive_input(application_deadline=today, drive_date=today))
+    later = service.save_drive(db, drive_input(application_deadline=tomorrow, drive_date=tomorrow + dt.timedelta(days=1)))
+    assert same_day['drive_date'] == today
+    assert later['application_deadline'] == tomorrow
 
 
 def test_departments_and_lifecycle(placement_db):
@@ -310,6 +328,30 @@ def test_admin_api_is_role_protected(placement_client, role):
     assert client.get('/api/placements/drives').status_code == (200 if role == 'student' else 403)
     if role != 'student':
         assert client.get(root+'/eligibility/P4').status_code == 403
+
+
+def test_placement_date_api_validation_applies_to_create_and_edit(placement_client):
+    client, _, drive, _ = placement_client
+    today = placement_today()
+    yesterday = today - dt.timedelta(days=1)
+    tomorrow = today + dt.timedelta(days=1)
+    invalid_create = drive_input(application_deadline=yesterday, drive_date=today).model_dump(mode='json')
+    response = client.post('/api/placements/drives', json=invalid_create)
+    assert response.status_code == 422
+    assert response.json()['detail'] == 'Application deadline cannot be in the past.'
+    invalid_edit = drive_input(application_deadline=tomorrow, drive_date=today).model_dump(mode='json')
+    response = client.put(f'/api/placements/drives/{drive}', json=invalid_edit)
+    assert response.status_code == 422
+    assert response.json()['detail'] == 'Drive date must be on or after the application deadline.'
+
+
+def test_unauthorized_user_cannot_bypass_placement_date_validation(placement_client):
+    client, user, drive, _ = placement_client
+    user.role, user.usn = 'student', 'P4'
+    yesterday = placement_today() - dt.timedelta(days=1)
+    body = drive_input(drive_date=yesterday).model_dump(mode='json')
+    assert client.post('/api/placements/drives', json=body).status_code == 403
+    assert client.put(f'/api/placements/drives/{drive}', json=body).status_code == 403
 
 
 def test_student_scope_and_normalization(placement_client):
