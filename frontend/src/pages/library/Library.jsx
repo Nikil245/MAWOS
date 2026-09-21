@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -32,9 +32,9 @@ function Pager({ offset, total, setOffset }) {
 }
 function useAction(reload) {
   const { token } = useAuth(); const [busy, setBusy] = useState(false), [error, setError] = useState(null), [message, setMessage] = useState('');
-  const run = async (path, body = {}, method = 'POST') => {
+  const run = async (path, body = {}, method = 'POST', successMessage = 'Library updated.') => {
     setBusy(true); setError(null); setMessage('');
-    try { const result = await api.libraryRequest(token, path, body, method); reload?.(); setMessage('Library updated.'); window.dispatchEvent(new Event('mawos:notifications-changed')); window.dispatchEvent(new Event('mawos:library-changed')); return result; }
+    try { const result = await api.libraryRequest(token, path, body, method); reload?.(); setMessage(successMessage); window.dispatchEvent(new Event('mawos:notifications-changed')); window.dispatchEvent(new Event('mawos:library-changed')); return result; }
     catch (reason) { setError(reason); return null; }
     finally { setBusy(false); }
   };
@@ -77,10 +77,10 @@ function BookEditor({ book, save, busy, close }) {
     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.is_active} onChange={event => setForm({ ...form, is_active: event.target.checked })} />Active catalogue entry</label></div><p className="mt-3 text-xs text-muted">Availability is calculated from total stock and copies currently held or issued.</p><div className="mt-3 flex gap-2"><button className="btn-primary" disabled={busy}>Save book</button><button type="button" className="btn-secondary" onClick={close}>Cancel edit</button></div></form>;
 }
 
-function Catalogue({ staff = false, onChange }) {
+function Catalogue({ staff = false, onChange, selectedBookId = null, selectionRequested = false, clearSelection }) {
   const [searchParams] = useSearchParams();
   const initialQuery = (searchParams.get('q') || '').slice(0, 128);
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const validView = value => value && typeof value.search === 'string' && value.search.length <= 128
     && typeof value.query === 'string' && value.query.length <= 128
     && Number.isInteger(value.offset) && value.offset >= 0 && value.offset <= 100000;
@@ -93,17 +93,39 @@ function Catalogue({ staff = false, onChange }) {
   useEffect(() => {
     if (initialQuery) setView({ search: initialQuery, query: initialQuery, offset: 0 });
   }, [initialQuery]);
-  const [detail, setDetail] = useState(null), [editing, setEditing] = useState(null);
+  const [detail, setDetail] = useState(null), [editing, setEditing] = useState(null), [selectedBook, setSelectedBook] = useState(null), [selectionMessage, setSelectionMessage] = useState('');
+  const borrowRef = useRef(null);
   const state = useLibrary(`/library/books?q=${encodeURIComponent(query)}&offset=${offset}&limit=${PAGE}&include_archived=${staff}`);
   const navigate = useNavigate(); const action = useAction(() => { state.reload(); onChange?.(); });
   const reserve = async id => { const result = await action.run('/student/library/reservations', { book_id: id }); if (result) navigate(`/student/library/slips/${result.id}`); };
   const save = async body => { const result = await action.run(`/librarian/library/books${editing.id ? `/${editing.id}` : ''}`, body, editing.id ? 'PUT' : 'POST'); if (result) setEditing(null); };
-  return <DashboardCard title="Catalogue" action={staff && <button className="btn-secondary" onClick={() => setEditing({})}>Add book</button>}>
+  useEffect(() => {
+    if (staff || !selectionRequested) return undefined;
+    if (!selectedBookId) {
+      setSelectedBook(null); setSelectionMessage('Selected book is unavailable or no longer accessible.'); clearSelection?.();
+      return undefined;
+    }
+    let active = true, timer;
+    api.libraryRequest(token, `/library/books/${selectedBookId}`).then(book => {
+      if (!active) return;
+      if (!book.is_active || book.available_copies < 1) {
+        setSelectedBook(null); setSelectionMessage('Book is unavailable.'); clearSelection?.();
+        return;
+      }
+      setSelectedBook(book); setSelectionMessage('');
+      timer = window.setTimeout(() => borrowRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 0);
+    }).catch(() => {
+      if (!active) return;
+      setSelectedBook(null); setSelectionMessage('Selected book is unavailable or no longer accessible.'); clearSelection?.();
+    });
+    return () => { active = false; if (timer) window.clearTimeout(timer); };
+  }, [staff, token, selectedBookId, selectionRequested, clearSelection]);
+  return <section id={staff ? undefined : 'book-borrow-reserve'} ref={borrowRef} tabIndex={-1}><DashboardCard title={staff ? 'Catalogue' : 'Book borrow / reserve'} action={staff && <button className="btn-secondary" onClick={() => setEditing({})}>Add book</button>}>
     <form onSubmit={event => { event.preventDefault(); setQuery(search.trim()); setOffset(0); }} className="mb-4 flex gap-2"><input aria-label="Search catalogue" className="field min-w-0" placeholder="Title, author, ISBN or category" maxLength="128" value={search} onChange={event => setSearch(event.target.value)} /><button className="btn-primary">Search</button></form>
-    <ActionStatus action={action} />{editing && <BookEditor key={editing.id || 'new'} book={editing.id ? editing : null} busy={action.busy} save={save} close={() => setEditing(null)} />}
-    <Load state={state}>{state.data?.items.length ? <div className="grid gap-3 md:grid-cols-2">{state.data.items.map(book => <article className="rounded-xl border p-4" key={book.id}><div className="flex items-start justify-between gap-2"><h3 className="font-bold break-words">{book.title}</h3><StatusBadge>{book.is_active ? `${book.available_copies} available` : 'Archived'}</StatusBadge></div><p className="mt-1 text-sm text-muted">{book.author} · {book.category}</p><p className="mt-1 text-xs text-muted">Book #{book.id} · ISBN {book.isbn} · Rating {book.average_rating ?? '—'}</p><div className="mt-4 flex flex-wrap gap-2"><button className="btn-secondary" onClick={() => setDetail(book.id)}>Details & reviews</button>{staff ? <><button className="btn-secondary" onClick={() => setEditing(book)}>Edit</button>{book.is_active && <button className="btn-secondary" disabled={action.busy} onClick={() => action.run(`/librarian/library/books/${book.id}/archive`)}>Archive</button>}</> : <button className="btn-primary" disabled={action.busy || !book.is_active || book.available_copies < 1} onClick={() => reserve(book.id)}>Reserve</button>}</div></article>)}</div> : <EmptyState title="No books found" detail="Try another title, author, ISBN or category." />}</Load>
+    <ActionStatus action={action} />{selectionMessage && <p role="status" className="mb-3 text-sm text-amber-700">{selectionMessage}</p>}{selectedBook && <section aria-label="Selected book for reservation" className="mb-4 rounded-xl border border-primary bg-blue-50 p-4"><p className="text-xs font-semibold uppercase text-primary">Selected for reservation</p><p className="mt-1 font-bold">{selectedBook.title}</p><p className="text-sm text-muted">{selectedBook.author} · {selectedBook.available_copies} available</p><div className="mt-3 flex flex-wrap gap-2"><button className="btn-primary" disabled={action.busy} onClick={() => reserve(selectedBook.id)}>Reserve selected book</button><button className="btn-secondary" onClick={() => { setSelectedBook(null); clearSelection?.(); }}>Clear selection</button></div></section>}{editing && <BookEditor key={editing.id || 'new'} book={editing.id ? editing : null} busy={action.busy} save={save} close={() => setEditing(null)} />}
+    <Load state={state}>{state.data?.items.length ? <div className="grid gap-3 md:grid-cols-2">{state.data.items.map(book => <article className="rounded-xl border p-4" key={book.id}><div className="flex items-start justify-between gap-2"><h3 className="font-bold break-words">{book.title}</h3><StatusBadge>{book.is_active ? `${book.available_copies} available` : 'Archived'}</StatusBadge></div><p className="mt-1 text-sm text-muted">{book.author} · {book.category}</p><p className="mt-1 text-xs text-muted">Book #{book.id} · ISBN {book.isbn} · Rating {book.average_rating ?? '—'}</p><div className="mt-4 flex flex-wrap gap-2"><button className="btn-secondary" onClick={() => setDetail(book.id)}>Details & reviews</button>{staff ? <><button className="btn-secondary" onClick={() => setEditing(book)}>Edit</button>{book.is_active ? <button className="btn-secondary" disabled={action.busy} onClick={() => action.run(`/librarian/library/books/${book.id}/archive`, {}, 'POST', 'Book archived.')}>Archive</button> : <button className="btn-secondary" disabled={action.busy} onClick={() => action.run(`/librarian/library/books/${book.id}/unarchive`, {}, 'POST', 'Book restored.')}>Restore</button>}</> : <button className="btn-primary" disabled={action.busy || !book.is_active || book.available_copies < 1} onClick={() => reserve(book.id)}>Reserve</button>}</div></article>)}</div> : <EmptyState title="No books found" detail="Try another title, author, ISBN or category." />}</Load>
     <Pager offset={offset} total={state.data?.total || 0} setOffset={setOffset} />{detail && <BookDetail key={detail} id={detail} close={() => setDetail(null)} />}
-  </DashboardCard>;
+  </DashboardCard></section>;
 }
 
 function ReturnRequest({ row, action, close }) {
@@ -132,14 +154,27 @@ function StudentRecords({ onChange }) {
       {kind === 'fines' && <><p className="mt-2 font-semibold">{money(row.amount)}</p><p className="text-sm">Created {date(row.created_at)}{row.paid_at && ` · Paid ${date(row.paid_at)}`}</p><p className="mt-2 text-sm text-muted">{row.status === 'UNPAID' ? 'Pay in person at the library counter.' : 'Payment recorded by the library.'}</p></>}
     </article>)}</div> : <EmptyState title="No library records yet" />}</Load><Pager offset={offset} total={state.data?.total || 0} setOffset={setOffset} /></DashboardCard>;
 }
-function Recommendations() {
-  const state = useLibrary('/student/library/recommendations'); const [detail, setDetail] = useState(null);
-  return <DashboardCard title="Recommended for you"><Load state={state}>{state.data?.items.length ? <div className="space-y-3">{state.data.items.map(row => <button className="block w-full rounded-lg border p-3 text-left hover:bg-slate-50" key={row.id} onClick={() => setDetail(row.id)}><b>{row.title}</b><p className="mt-1 text-xs text-muted">{row.explanations.join(' · ')}</p></button>)}</div> : <EmptyState title="No recommendations yet" />}</Load>{detail && <BookDetail key={detail} id={detail} close={() => setDetail(null)} />}</DashboardCard>;
+function Recommendations({ onSelectBook }) {
+  const state = useLibrary('/student/library/recommendations'); const [message, setMessage] = useState('');
+  return <DashboardCard title="Recommended for you"><Load state={state}>{state.data?.items.length ? <div className="space-y-3">{state.data.items.map(row => {
+    const available = row.is_active && row.available_copies > 0;
+    return <button aria-label={`Reserve recommended ${row.title}`} aria-disabled={!available} className="block w-full rounded-lg border p-3 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70" key={row.id} onClick={() => available ? onSelectBook(row.id) : setMessage('This recommended book is currently unavailable.')}><div className="flex items-start justify-between gap-2"><b>{row.title}</b><StatusBadge>{available ? `${row.available_copies} available` : 'Unavailable'}</StatusBadge></div><p className="mt-1 text-xs text-muted">{row.explanations.join(' · ')}</p></button>;
+  })}</div> : <EmptyState title="No recommendations yet" />}</Load>{message && <p role="status" className="mt-3 text-sm text-amber-700">{message}</p>}</DashboardCard>;
 }
 export function StudentLibrary() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const state = useLibrary('/student/library/summary'); const [revision, setRevision] = useState(0);
   const reload = () => { state.reload(); setRevision(value => value + 1); };
-  return <><PageHeader title="My Library" eyebrow="Student / Physical library" actions={<button className="btn-secondary" onClick={() => window.dispatchEvent(new Event('mawos:library-changed'))}>Refresh Library</button>} /><p className="mb-5 text-sm text-muted">Reserve a copy, show your slip at pickup, and hand returns to the librarian. Fines are collected in person.</p><div className="mb-5"><Load state={state}><LibrarySummaryCard data={state.data} /></Load></div><div className="space-y-5"><Catalogue onChange={reload} /><StudentRecords onChange={reload} /><Recommendations key={revision} /></div></>;
+  const rawBookId = searchParams.get('book') || '';
+  const selectedBookId = /^[1-9]\d{0,9}$/.test(rawBookId) ? Number(rawBookId) : null;
+  const selectBook = useCallback(id => {
+    const next = new URLSearchParams(searchParams); next.set('book', String(id)); setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+  const clearSelection = useCallback(() => {
+    if (!searchParams.has('book')) return;
+    const next = new URLSearchParams(searchParams); next.delete('book'); setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+  return <><PageHeader title="My Library" eyebrow="Student / Physical library" actions={<button className="btn-secondary" onClick={() => window.dispatchEvent(new Event('mawos:library-changed'))}>Refresh Library</button>} /><p className="mb-5 text-sm text-muted">Reserve a copy, show your slip at pickup, and hand returns to the librarian. Fines are collected in person.</p><div className="mb-5"><Load state={state}><LibrarySummaryCard data={state.data} /></Load></div><div className="space-y-5"><Catalogue onChange={reload} selectedBookId={selectedBookId} selectionRequested={Boolean(rawBookId)} clearSelection={clearSelection} /><StudentRecords onChange={reload} /><Recommendations key={revision} onSelectBook={selectBook} /></div></>;
 }
 export function LibrarySlip() {
   const { reservationId } = useParams(), { token } = useAuth();
@@ -151,28 +186,37 @@ export function LibrarySlip() {
   return <><PageHeader title="Pickup acknowledgement" eyebrow="Student / Private reservation slip" actions={<Link className="btn-secondary" to="/student/library">Back to Library</Link>} /><Load state={state}>{state.data && <DashboardCard title={state.data.title}><p>{state.data.author}</p><p className="mt-3">{state.data.student_name} · {state.data.student_usn}</p><p className="mt-6 text-sm text-muted">Your pickup code</p><p className="my-3 font-mono text-4xl font-bold tracking-widest">{state.data.slip_code}</p><StatusBadge>{state.data.status.replaceAll('_', ' ')}</StatusBadge><p className="mt-4">Collect by {date(state.data.pickup_deadline)}</p><p className="mt-2 text-sm text-muted">Bring this slip and your student ID to the library. The librarian checks validity at handover.</p><button className="btn-primary mt-5" disabled={busy} onClick={download}>Download PDF slip</button>{error && <p role="alert" className="mt-3 text-red-700">{error.message}</p>}</DashboardCard>}</Load></>;
 }
 
-function StaffRecords({ onChange }) {
+function StaffRecords({ onChange, operationRequest }) {
   const [kind, setKind] = useState('pickups'), [offset, setOffset] = useState(0), [rejectId, setRejectId] = useState(null), [reason, setReason] = useState('');
+  const operationsRef = useRef(null);
   const state = useLibrary(`/librarian/library/records/${kind}?offset=${offset}&limit=${PAGE}`);
   const action = useAction(() => { state.reload(); onChange(); });
-  return <DashboardCard title="Library operations"><div className="mb-4 flex flex-wrap gap-2">{[['pickups', 'Pending pickups'], ['returns', 'Pending returns'], ['issues', 'All issues / Counter returns'], ['overdue', 'Overdue report'], ['fines', 'Fine collection'], ['reviews', 'Reviews']].map(([key, label]) => <button key={key} className={kind === key ? 'btn-primary' : 'btn-secondary'} onClick={() => { setKind(key); setOffset(0); setRejectId(null); }}>{label}</button>)}</div><ActionStatus action={action} />
+  useEffect(() => {
+    if (!operationRequest) return undefined;
+    setKind(operationRequest.kind); setOffset(0); setRejectId(null);
+    const timer = window.setTimeout(() => operationsRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 0);
+    return () => window.clearTimeout(timer);
+  }, [operationRequest]);
+  return <section id="library-operations" ref={operationsRef} tabIndex={-1}><DashboardCard title="Library operations"><div className="mb-4 flex flex-wrap gap-2">{[['pickups', 'Pending pickups'], ['returns', 'Pending returns'], ['issues', 'All issues / Counter returns'], ['overdue', 'Overdue report'], ['fines', 'Fine collection'], ['reviews', 'Reviews']].map(([key, label]) => <button key={key} className={kind === key ? 'btn-primary' : 'btn-secondary'} onClick={() => { setKind(key); setOffset(0); setRejectId(null); }}>{label}</button>)}</div><ActionStatus action={action} />
     <Load state={state}>{state.data?.items.length ? <div className="space-y-3">{state.data.items.map(row => <article className="rounded-xl border p-4" key={row.id}><div className="flex flex-wrap justify-between gap-2"><b>{row.title || row.reason || `Book #${row.book_id}`}</b><StatusBadge>{row.status?.replaceAll('_', ' ') || `${row.rating}/5`}</StatusBadge></div><p className="mt-1 text-sm text-muted">{row.student_usn} · Record #{row.id}</p>
       {kind === 'pickups' && <><p className="mt-2 text-sm">Pickup deadline: {date(row.pickup_deadline)}</p><button className="btn-primary mt-3" disabled={action.busy || new Date(row.pickup_deadline) <= new Date()} onClick={() => action.run(`/librarian/library/reservations/${row.id}/pickup`)}>Confirm physical pickup</button></>}
       {['issues', 'returns', 'overdue'].includes(kind) && <><p className="mt-2 text-sm">Due {date(row.due_at)} · Estimated fine {money(row.estimated_fine)}</p>{row.status !== 'RETURNED' && <div className="mt-3 flex flex-wrap gap-2"><button className="btn-primary" disabled={action.busy} onClick={() => action.run(`/librarian/library/issues/${row.id}/return`)}>Confirm physical return</button>{row.status === 'RETURN_PENDING' && <button className="btn-secondary" onClick={() => { setRejectId(row.id); setReason(''); }}>Reject return</button>}</div>}{rejectId === row.id && <form className="mt-3 flex flex-wrap gap-2" onSubmit={async event => { event.preventDefault(); if (await action.run(`/librarian/library/issues/${row.id}/reject-return`, { reason })) setRejectId(null); }}><input aria-label="Return rejection reason" className="field" required maxLength="1000" value={reason} onChange={event => setReason(event.target.value)} /><button className="btn-primary" disabled={action.busy || !reason.trim()}>Save rejection</button></form>}</>}
       {kind === 'fines' && <><p className="mt-2 font-semibold">{money(row.amount)} · {date(row.created_at)}</p>{row.status === 'UNPAID' && <button className="btn-primary mt-3" disabled={action.busy} onClick={() => action.run(`/librarian/library/fines/${row.id}/paid`)}>Confirm cash collected / Mark paid</button>}{row.paid_at && <p className="text-sm">Paid {date(row.paid_at)}</p>}</>}
       {kind === 'reviews' && <p className="mt-2 whitespace-pre-wrap break-words text-sm">{row.comment || 'Rating only'}</p>}
-    </article>)}</div> : <EmptyState title="No matching library records" />}</Load><Pager offset={offset} total={state.data?.total || 0} setOffset={setOffset} /></DashboardCard>;
+    </article>)}</div> : <EmptyState title="No matching library records" />}</Load><Pager offset={offset} total={state.data?.total || 0} setOffset={setOffset} /></DashboardCard></section>;
 }
 export function LibrarianLibrary() {
-  const summary = useLibrary('/librarian/library/summary'); const [revision, setRevision] = useState(0), [code, setCode] = useState(''), [verified, setVerified] = useState(null), [usn, setUsn] = useState(''), [bookId, setBookId] = useState('');
+  const summary = useLibrary('/librarian/library/summary'); const [revision, setRevision] = useState(0), [code, setCode] = useState(''), [verified, setVerified] = useState(null), [usn, setUsn] = useState(''), [bookId, setBookId] = useState(''), [operationRequest, setOperationRequest] = useState(null);
   const { token, user } = useAuth(); const [verifyError, setVerifyError] = useState(null), [verifying, setVerifying] = useState(false);
   const reload = () => { summary.reload(); setRevision(value => value + 1); };
   const action = useAction(reload);
   const verify = async event => { event.preventDefault(); setVerified(null); setVerifyError(null); setVerifying(true); try { setVerified(await api.libraryRequest(token, '/librarian/library/verify-slip', { slip_code: code }, 'POST')); } catch (reason) { setVerifyError(reason); } finally { setVerifying(false); } };
-  return <><PageHeader title="Library desk" eyebrow={`${user?.role === 'admin' ? 'Admin oversight' : 'Librarian'} / Physical lending`} actions={<button className="btn-secondary" onClick={() => window.dispatchEvent(new Event('mawos:library-changed'))}>Refresh Library</button>} /><Load state={summary}>{summary.data && <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{[['Issued books', summary.data.issued_count], ['Pending pickups', summary.data.pending_pickups], ['Pending returns', summary.data.pending_returns], ['Overdue books', summary.data.overdue_count], ['Unpaid fines', money(summary.data.unpaid_total)]].map(([label, value]) => <StatCard key={label} label={label} value={value} icon={BookOpen} />)}</div>}</Load><ActionStatus action={action} />
+  const openOperation = kind => setOperationRequest(current => ({ kind, id: (current?.id || 0) + 1 }));
+  const kpis = [['Issued books', summary.data?.issued_count, 'issues'], ['Pending pickups', summary.data?.pending_pickups, 'pickups'], ['Pending returns', summary.data?.pending_returns, 'returns'], ['Overdue books', summary.data?.overdue_count, 'overdue'], ['Unpaid fines', summary.data && money(summary.data.unpaid_total), 'fines']];
+  return <><PageHeader title="Library desk" eyebrow={`${user?.role === 'admin' ? 'Admin oversight' : 'Librarian'} / Physical lending`} actions={<button className="btn-secondary" onClick={() => window.dispatchEvent(new Event('mawos:library-changed'))}>Refresh Library</button>} /><Load state={summary}>{summary.data && <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{kpis.map(([label, value, kind]) => <button type="button" key={label} aria-label={`Open ${label}`} className="block w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" onClick={() => openOperation(kind)}><StatCard label={label} value={value} icon={BookOpen} /></button>)}</div>}</Load><ActionStatus action={action} />
     <div className="mb-5 grid gap-5 lg:grid-cols-2"><DashboardCard title="Verify pickup slip"><form onSubmit={verify} className="flex gap-2"><input aria-label="Six-digit slip code" className="field min-w-0" inputMode="numeric" pattern="[0-9]{6}" maxLength="6" required value={code} onChange={event => { setCode(event.target.value); setVerified(null); }} /><button className="btn-primary" disabled={verifying}>Verify slip</button></form>{verifyError && <p role="alert" className="mt-3 text-red-700">{verifyError.message}</p>}{verified && <div className="mt-4 rounded-lg border p-3"><b>{verified.title}</b><p>{verified.student_name} · {verified.student_usn}</p><p className="text-sm">Collect by {date(verified.pickup_deadline)}</p><button className="btn-primary mt-3" disabled={action.busy} onClick={async () => { if (await action.run(`/librarian/library/reservations/${verified.id}/pickup`)) { setVerified(null); setCode(''); } }}>Confirm verified pickup</button></div>}</DashboardCard>
     <DashboardCard title="Direct counter issue"><form onSubmit={async event => { event.preventDefault(); if (await action.run('/librarian/library/issues', { student_usn: usn, book_id: Number(bookId) })) { setUsn(''); setBookId(''); } }}><div className="grid gap-3 sm:grid-cols-2"><label className="label">Student USN<input className="field" maxLength="16" required value={usn} onChange={event => setUsn(event.target.value.toUpperCase())} /></label><label className="label">Book ID<input className="field" type="number" min="1" required value={bookId} onChange={event => setBookId(event.target.value)} /></label></div><button className="btn-primary mt-3" disabled={action.busy}>Issue at counter</button></form><p className="mt-3 text-xs text-muted">Confirm only when handing the physical book to the student.</p></DashboardCard></div>
-    <div className="space-y-5"><StaffRecords key={`records-${revision}`} onChange={summary.reload} /><Catalogue key={`catalogue-${revision}`} staff onChange={summary.reload} /></div></>;
+    <div className="space-y-5"><StaffRecords key={`records-${revision}`} onChange={summary.reload} operationRequest={operationRequest} /><Catalogue key={`catalogue-${revision}`} staff onChange={summary.reload} /></div></>;
 }
 
 export function LibrarianManagement() {

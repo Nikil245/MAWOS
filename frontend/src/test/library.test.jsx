@@ -120,6 +120,18 @@ describe('physical library UI', () => {
     await waitFor(() => expect(mocks.request).toHaveBeenCalledWith('library-token', '/librarian/library/fines/41/paid', {}, 'POST'));
   });
 
+  it('makes every librarian KPI a keyboard-accessible operation shortcut', async () => {
+    mocks.role = 'librarian';
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    render(<MemoryRouter><LibrarianLibrary /></MemoryRouter>);
+    for (const [kpi, tab] of [['Issued books', 'All issues / Counter returns'], ['Pending pickups', 'Pending pickups'], ['Pending returns', 'Pending returns'], ['Overdue books', 'Overdue report'], ['Unpaid fines', 'Fine collection']]) {
+      fireEvent.click(await screen.findByRole('button', { name: `Open ${kpi}` }));
+      expect(await screen.findByRole('button', { name: tab, exact: true })).toHaveClass('btn-primary');
+    }
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+  });
+
   it('shows read-only parent book and fine summary without slip or action controls', () => {
     render(<LibrarySummaryCard data={summary} parent />);
     expect(screen.getByText('Database Systems')).toBeInTheDocument();
@@ -186,6 +198,52 @@ describe('physical library UI', () => {
     await waitFor(() => expect(mocks.request).toHaveBeenCalledWith('library-token', '/librarian/library/books/11', expect.objectContaining({ total_copies: 3 }), 'PUT'));
     fireEvent.click(await screen.findByRole('button', { name: 'Archive', exact: true }));
     await waitFor(() => expect(mocks.request).toHaveBeenCalledWith('library-token', '/librarian/library/books/11/archive', {}, 'POST'));
+  });
+
+  it('shows Restore only for archived catalogue books and refreshes it to Archive', async () => {
+    mocks.role = 'librarian'; let restored = false;
+    mocks.request.mockImplementation((token, path, body) => {
+      if (path.startsWith('/library/books?')) return Promise.resolve({ items: [{ ...book, is_active: restored }], total: 1 });
+      if (path === '/librarian/library/books/11/unarchive') { restored = true; return Promise.resolve({ ...book, is_active: true }); }
+      return defaults(token, path, body);
+    });
+    render(<MemoryRouter><LibrarianLibrary /></MemoryRouter>);
+    expect(await screen.findByRole('button', { name: 'Restore', exact: true })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Archive', exact: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore', exact: true }));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledWith('library-token', '/librarian/library/books/11/unarchive', {}, 'POST'));
+    expect(await screen.findByText('Book restored.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Archive', exact: true })).toBeInTheDocument();
+  });
+
+  it('opens the borrow and reserve control with an available recommendation preselected', async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    student();
+    fireEvent.click(await screen.findByRole('button', { name: 'Reserve recommended Database Systems' }));
+    expect(await screen.findByRole('region', { name: 'Selected book for reservation' })).toHaveTextContent('Database Systems');
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledWith('library-token', '/library/books/11'));
+    fireEvent.click(screen.getByRole('button', { name: 'Reserve selected book' }));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledWith('library-token', '/student/library/reservations', { book_id: 11 }, 'POST'));
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('does not initiate a reservation flow for an unavailable recommendation', async () => {
+    mocks.request.mockImplementation((token, path, body) => path.includes('recommendations')
+      ? Promise.resolve({ items: [{ ...book, available_copies: 0, explanations: ['Relevant to your department'] }] })
+      : defaults(token, path, body));
+    student();
+    fireEvent.click(await screen.findByRole('button', { name: 'Reserve recommended Database Systems' }));
+    expect(await screen.findByText('This recommended book is currently unavailable.')).toBeInTheDocument();
+    expect(mocks.request.mock.calls.some(([, path]) => path === '/library/books/11')).toBe(false);
+  });
+
+  it('clears an invalid direct book selection without exposing a reservation action', async () => {
+    mocks.request.mockImplementation((token, path, body) => path === '/library/books/999'
+      ? Promise.reject(new Error('Not found')) : defaults(token, path, body));
+    student('/student/library?book=999');
+    expect(await screen.findByText('Selected book is unavailable or no longer accessible.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reserve selected book' })).not.toBeInTheDocument();
   });
 
   it('protects actual librarian routes and safe role return paths', async () => {

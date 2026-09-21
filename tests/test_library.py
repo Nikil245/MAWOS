@@ -180,6 +180,25 @@ def test_stock_archive_and_recommendations(db, library):
     assert call(users, 'student', 'get', '/library/books?limit=101').status_code == 422
 
 
+def test_restore_archived_book_preserves_stock_and_history_and_requires_staff(db, library):
+    users, book = library
+    issued = issue(users, book)
+    db.expire_all(); book = db.get(Book, book.id)
+    original = (book.isbn, book.title, book.author, book.category, book.total_copies, book.available_copies)
+    assert call(users, 'librarian', 'post', f'/librarian/library/books/{book.id}/archive').status_code == 200
+    assert call(users, 'student', 'post', f'/librarian/library/books/{book.id}/unarchive').status_code == 403
+    restored = call(users, 'admin', 'post', f'/librarian/library/books/{book.id}/unarchive')
+    assert restored.status_code == 200, restored.text
+    assert restored.json()['is_active'] is True
+    db.expire_all(); persisted = db.get(Book, book.id)
+    assert (persisted.isbn, persisted.title, persisted.author, persisted.category,
+            persisted.total_copies, persisted.available_copies) == original
+    assert db.get(BookIssue, issued['id']).book_id == book.id
+    assert call(users, 'librarian', 'post', f'/librarian/library/books/{book.id}/unarchive').status_code == 409
+    # Restored entries become eligible again; the existing circulation history remains intact.
+    assert reserve(users, book, role='other')['book_id'] == book.id
+
+
 @pytest.mark.parametrize('role', ['student', 'other', 'faculty', 'hod', 'principal', 'parent'])
 def test_non_librarian_roles_cannot_read_or_mutate_operations(library, role):
     users, book = library
@@ -187,7 +206,7 @@ def test_non_librarian_roles_cannot_read_or_mutate_operations(library, role):
         assert call(users, role, 'get', path).status_code == 403
     for path in ['/librarian/library/verify-slip', '/librarian/library/issues', '/librarian/library/reservations/1/pickup',
                  '/librarian/library/issues/1/return', '/librarian/library/issues/1/reject-return', '/librarian/library/fines/1/paid',
-                 '/librarian/library/books', '/librarian/library/books/1/archive', '/admin/librarians']:
+                 '/librarian/library/books', '/librarian/library/books/1/archive', '/librarian/library/books/1/unarchive', '/admin/librarians']:
         assert call(users, role, 'post', path, {}).status_code == 403
     assert call(users, role, 'put', f'/librarian/library/books/{book.id}', {}).status_code == 403
     assert call(users, role, 'get', '/library/books?include_archived=true').status_code == 403

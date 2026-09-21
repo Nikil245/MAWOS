@@ -76,6 +76,12 @@ def archive_book(book_id: int, user=Depends(staff), db=Depends(get_session)):
     return s.book_record(db, book)
 
 
+@router.post('/librarian/library/books/{book_id}/unarchive')
+def unarchive_book(book_id: int, user=Depends(staff), db=Depends(get_session)):
+    book = s.restore_book(db, book_id); commit(db)
+    return s.book_record(db, book)
+
+
 @router.get('/student/library/summary')
 def student_summary(user=Depends(student), db=Depends(get_session)):
     return s.summary(db, student_usn(user))

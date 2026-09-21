@@ -130,6 +130,16 @@ def catalogue(db, q='', offset=0, limit=20, include_archived=False):
         query.order_by(func.lower(Book.title), Book.id).offset(offset).limit(limit)]}
 
 
+def restore_book(db, book_id):
+    """Restore an archived catalogue entry without changing its stock or history."""
+    book = locked(db, Book, book_id)
+    if book.is_active:
+        raise HTTPException(409, 'Book is already active')
+    book.is_active = True
+    db.flush()
+    return book
+
+
 def assistant_catalogue_search(db, term, limit=12, *, available_only=False):
     """Return ranked, active catalogue facts safe for student chat.
 
