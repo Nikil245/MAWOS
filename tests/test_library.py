@@ -11,6 +11,7 @@ from backend.app.main import app
 from backend.app.models import (Book, BookDepartment, BookIssue, BookReservation, BookReview,
     Department, LibraryFine, LibrarianAccount, Notification, Parent, ParentStudent, Student, User)
 from backend.app.library import service as s
+from backend.app.library.api import slip_pdf
 from backend.app.library.schemas import BookInput
 
 client = TestClient(app)
@@ -71,11 +72,37 @@ def test_reservation_hold_duplicate_cancellation_and_owned_slip(db, library):
     assert len(response.json()['slip_code']) == 6
     pdf = call(users, 'student', 'get', f"/student/library/reservations/{row['id']}/slip.pdf")
     assert pdf.status_code == 200 and pdf.content.startswith(b'%PDF-1.4')
+    assert pdf.headers['cache-control'] == 'no-store'
+    assert pdf.headers['content-disposition'] == f"attachment; filename=\"library-slip-{row['id']}.pdf\""
+    # The printable document retains every former slip field and adds the
+    # reader-facing book/student details required at the verification desk.
+    for value in (b'BOOK VERIFICATION SLIP', str(row['id']).encode(), row['student_usn'].encode(),
+                  book.isbn.encode(), response.json()['slip_code'].encode(), b'PENDING_PICKUP',
+                  book.title.encode(), book.author.encode(), b'VERIFICATION STATUS'):
+        assert value in pdf.content
     assert 'slip_code' not in str(call(users, 'student', 'get', '/student/library/reservations').json())
     assert call(users, 'other', 'post', f"/student/library/reservations/{row['id']}/cancel").status_code == 404
     for _ in range(2):
         assert call(users, 'student', 'post', f"/student/library/reservations/{row['id']}/cancel").status_code == 200
     db.expire_all(); assert db.get(Book, book.id).available_copies == 2
+
+
+def test_verification_pdf_wraps_maximum_catalogue_fields_on_one_a4_page():
+    """The generator's bounds guard and wrapping keep long catalogue data printable."""
+    title, author = 'Start ' + 'title ' * 50 + 'Finish', 'First ' + 'author ' * 35 + 'Last'
+    pdf = slip_pdf({
+        'reservation_id': 999, 'slip_code': '012345', 'requested_at': '01 Aug 2026 10:00 IST',
+        'student_name': 'Student Name ' * 10, 'student_usn': '4MT23AI001',
+        'programme': 'Artificial Intelligence and Machine Learning', 'semester': 'Semester 5 / Year 3',
+        'title': title, 'author': author, 'isbn': '9780000000001', 'book_id': 101,
+        'pickup_deadline': '03 Aug 2026 10:00 IST', 'status': 'PENDING_PICKUP',
+    })
+    assert b'/MediaBox [0 0 595 842]' in pdf  # A4, one page
+    assert b'/Count 1' in pdf
+    # The first and last words prove wrapped values are not clipped at either end.
+    assert b'(Start ' in pdf and b'Finish)' in pdf
+    assert b'(First ' in pdf and b'Last)' in pdf
+    assert b'Page 1 of 1' in pdf
 
 
 def test_pickup_safe_retries_and_return_fines_until_physical_confirmation(db, library, monkeypatch):

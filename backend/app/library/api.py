@@ -1,5 +1,6 @@
 """Authenticated physical library API; no public or parent mutations."""
 import datetime as dt
+import textwrap
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func
@@ -8,8 +9,8 @@ from sqlalchemy.exc import IntegrityError
 from ..agents import get_agents
 from ..auth import get_current_user, hash_password, require_role
 from ..database import get_session
-from ..models import (Book, BookIssue, BookReservation, LibraryFine, LibrarianAccount,
-                      Student, User, utcnow)
+from ..models import (Book, BookIssue, BookReservation, Department, LibraryFine,
+                      LibrarianAccount, Student, User, utcnow)
 from ..parent_portal import child_for_parent, generated_password, require_parent
 from . import service as s
 from .schemas import (BookInput, DirectIssueInput, LibrarianCreate, LibrarianUpdate,
@@ -113,33 +114,150 @@ def slip(reservation_id: int, response: Response, user=Depends(student), db=Depe
     return s.reservation_record(db, s.owned(db, BookReservation, reservation_id, student_usn(user)), slip=True)
 
 
-def slip_pdf(lines):
-    """Small single-page PDF using only ASCII identifiers and built-in Helvetica."""
-    escape = lambda text: str(text).replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
-    content = ('BT /F1 14 Tf 50 780 Td ' + ' '.join(f'({escape(line)}) Tj 0 -28 Td' for line in lines) + ' ET').encode('ascii')
+def _pdf_text(value):
+    """Encode text for the built-in Helvetica font without allowing PDF syntax."""
+    return str(value).encode('latin-1', 'replace').decode('latin-1').replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+
+
+def _pdf_lines(value, width):
+    """Wrap predictable record fields, including a legacy value with no spaces."""
+    return textwrap.wrap(str(value), width=width, break_long_words=True,
+                         break_on_hyphens=True) or ['']
+
+
+def slip_pdf(record):
+    """Build a one-page, print-safe A4 collection and verification slip.
+
+    The project deliberately has no PDF dependency.  This retains the existing
+    small PDF writer while giving it a structured layout and an explicit bounds
+    check so unusually long catalogue data cannot silently run off the page.
+    """
+    commands, page_width, margin = [], 595, 42
+
+    def command(value):
+        commands.append(value)
+
+    def text(value, x, y, size=9, bold=False, colour='0.12 0.16 0.23'):
+        command(f'BT /F{2 if bold else 1} {size} Tf {colour} rg 1 0 0 1 {x:.1f} {y:.1f} Tm ({_pdf_text(value)}) Tj ET')
+
+    def rule(x, y, width, height, stroke='0.75 0.79 0.84', fill=None, line=0.7):
+        command('q')
+        if fill:
+            command(f'{fill} rg {x:.1f} {y:.1f} {width:.1f} {height:.1f} re f')
+        command(f'{stroke} RG {line} w {x:.1f} {y:.1f} {width:.1f} {height:.1f} re S Q')
+
+    def wrapped(value, x, y, width, size=9, bold=False, leading=12):
+        # Helvetica averages roughly half an em per character at this size.
+        chars = max(12, int(width / (size * 0.52)))
+        lines = _pdf_lines(value, chars)
+        for line in lines:
+            text(line, x, y, size, bold)
+            y -= leading
+        return y, len(lines)
+
+    def section(title, y):
+        rule(margin, y - 21, page_width - margin * 2, 21, fill='0.93 0.96 0.99')
+        text(title.upper(), margin + 10, y - 14, 9, True, '0.08 0.25 0.48')
+        return y - 31
+
+    def field(label, value, x, y, width):
+        text(label.upper(), x, y, 7, True, '0.33 0.39 0.48')
+        value_y, lines = wrapped(value, x, y - 13, width, 9, False, 12)
+        return value_y - 5, lines
+
+    # Header and identity: the existing MAWOS library name is the only institution
+    # branding available in the application, so no new institutional data is made up.
+    rule(margin, 782, page_width - margin * 2, 22, stroke='0.08 0.25 0.48', fill='0.08 0.25 0.48', line=1)
+    rule(margin, 56, page_width - margin * 2, 748, stroke='0.08 0.25 0.48', line=1)
+    text('MAWOS', margin + 12, 789, 15, True, '1 1 1')
+    text('UNIVERSITY ERP  /  LIBRARY SERVICES', margin + 78, 790, 8, True, '1 1 1')
+    text('MAWOS Library', margin + 1, 762, 13, True, '0.08 0.25 0.48')
+    text('BOOK VERIFICATION SLIP', margin + 1, 730, 18, True, '0.08 0.25 0.48')
+    text('Library Collection / Verification Record', margin + 1, 714, 9, False, '0.33 0.39 0.48')
+
+    # Upper-right metadata makes the code and transaction reference easy to find at the desk.
+    meta_x, meta_y, meta_w = 377, 750, 176
+    rule(meta_x, 676, meta_w, 74, stroke='0.48 0.58 0.68', fill='0.97 0.98 0.99')
+    text('SLIP METADATA', meta_x + 10, meta_y - 12, 8, True, '0.08 0.25 0.48')
+    text(f"Reservation ID  #{record['reservation_id']}", meta_x + 10, meta_y - 30, 9, True)
+    text(f"Pickup code  {record['slip_code']}", meta_x + 10, meta_y - 46, 9, True)
+    text(f"Reserved  {record['requested_at']}", meta_x + 10, meta_y - 62, 8)
+
+    y = 670
+    y = section('Student Information', y)
+    student_bottom, _ = field('Student Name', record['student_name'], margin + 10, y, 235)
+    usn_bottom, _ = field('USN', record['student_usn'], 310, y, 110)
+    programme_bottom, _ = field('Department / Programme', record['programme'], 430, y, 120)
+    student_bottom = min(student_bottom, usn_bottom, programme_bottom)
+    text(record['semester'], 430, student_bottom + 13, 8, False, '0.33 0.39 0.48')
+    y = student_bottom - 9
+
+    y = section('Book Information', y)
+    title_bottom, _ = field('Book Title', record['title'], margin + 10, y, 500)
+    author_bottom, _ = field('Author', record['author'], margin + 10, title_bottom, 500)
+    isbn_bottom, _ = field('ISBN', record['isbn'], margin + 10, author_bottom, 245)
+    book_bottom, _ = field('Book ID', record['book_id'], 310, author_bottom, 240)
+    y = min(isbn_bottom, book_bottom) - 9
+
+    y = section('Collection / Reservation Information', y)
+    requested_bottom, _ = field('Reservation Date', record['requested_at'], margin + 10, y, 245)
+    deadline_bottom, _ = field('Pickup Deadline', record['pickup_deadline'], 310, y, 240)
+    y = min(requested_bottom, deadline_bottom) - 7
+    rule(margin + 10, y - 35, 500, 31, stroke='0.08 0.25 0.48', fill='0.94 0.97 1')
+    text('VERIFICATION STATUS', margin + 20, y - 16, 8, True, '0.08 0.25 0.48')
+    # Keep the stored enum value intact; it is what staff verify at handover.
+    text(record['status'], 220, y - 17, 11, True, '0.08 0.25 0.48')
+    text('Status must be checked by library staff at physical handover.', 220, y - 29, 7, False, '0.33 0.39 0.48')
+    y -= 47
+
+    y = section('Librarian Verification', y)
+    rule(margin + 10, y - 58, 500, 52, fill='0.99 0.99 0.99')
+    text('Verify the pickup code, student ID, current status and deadline before handover.', margin + 20, y - 18, 8)
+    text('Librarian signature', margin + 20, y - 46, 7, True, '0.33 0.39 0.48')
+    command(f'0.45 0.49 0.55 RG 0.6 w {margin + 20} {y - 52} m 245 {y - 52} l S')
+    text('Date', 282, y - 46, 7, True, '0.33 0.39 0.48')
+    command(f'0.45 0.49 0.55 RG 0.6 w 282 {y - 52} m 390 {y - 52} l S')
+    text('Library stamp', 426, y - 46, 7, True, '0.33 0.39 0.48')
+    command(f'0.45 0.49 0.55 RG 0.6 w 426 {y - 52} m 532 {y - 52} l S')
+    y -= 73
+
+    # This assertion is a regression guard for maximum-length catalogue fields.
+    if y < 76:
+        raise ValueError('Library slip content exceeds the printable A4 area')
+    command(f'0.75 0.79 0.84 RG 0.5 w {margin} 76 m {page_width - margin} 76 l S')
+    text('Bring this slip and your student ID to the library. Validity is checked at physical handover.', margin, 64, 8, False, '0.33 0.39 0.48')
+    text('MAWOS Library  |  Page 1 of 1', 401, 64, 8, False, '0.33 0.39 0.48')
+
+    content = '\n'.join(commands).encode('latin-1')
     objects = [b'<< /Type /Catalog /Pages 2 0 R >>', b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>',
         b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
         f'<< /Length {len(content)} >>\nstream\n'.encode() + content + b'\nendstream']
     data = b'%PDF-1.4\n'; offsets = [0]
     for index, obj in enumerate(objects, 1):
         offsets.append(len(data)); data += f'{index} 0 obj\n'.encode() + obj + b'\nendobj\n'
     start = len(data)
-    data += b'xref\n0 6\n0000000000 65535 f \n'
+    data += b'xref\n0 7\n0000000000 65535 f \n'
     data += b''.join(f'{offset:010d} 00000 n \n'.encode() for offset in offsets[1:])
-    return data + f'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n'.encode()
+    return data + f'trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n'.encode()
 
 
 @router.get('/student/library/reservations/{reservation_id}/slip.pdf')
 def pdf(reservation_id: int, user=Depends(student), db=Depends(get_session)):
     row = s.owned(db, BookReservation, reservation_id, student_usn(user))
-    # Encode identifiers safely even if a legacy USN contains non-ASCII text.
-    usn = row.student_usn.encode('ascii', 'backslashreplace').decode()
-    deadline = row.pickup_deadline.replace(tzinfo=dt.timezone.utc).astimezone(s.INDIA).strftime('%d %b %Y %H:%M IST')
-    data = slip_pdf(['MAWOS Library - Pickup acknowledgement', f'Reservation: {row.id}',
-        f'Student USN: {usn}', f'Book ISBN: {db.get(Book, row.book_id).isbn}',
-        f'Pickup code: {row.slip_code}', f'Status: {row.status}', f'Collect by: {deadline}',
-        'Bring this slip and your student ID to the library.', 'Validity is checked at physical handover.'])
+    book, profile = db.get(Book, row.book_id), db.get(Student, row.student_usn)
+    department = db.get(Department, profile.dept_code)
+    date_format = '%d %b %Y %H:%M IST'
+    ist = lambda value: value.replace(tzinfo=dt.timezone.utc).astimezone(s.INDIA).strftime(date_format)
+    data = slip_pdf({
+        'reservation_id': row.id, 'slip_code': row.slip_code, 'requested_at': ist(row.requested_at),
+        'student_name': profile.name, 'student_usn': row.student_usn,
+        'programme': department.name if department else profile.dept_code,
+        'semester': f'Semester {profile.semester} / Year {profile.year}',
+        'title': book.title, 'author': book.author, 'isbn': book.isbn, 'book_id': book.id,
+        'pickup_deadline': ist(row.pickup_deadline), 'status': row.status,
+    })
     return Response(data, media_type='application/pdf', headers={'Cache-Control': 'no-store',
         'Content-Disposition': f'attachment; filename="library-slip-{row.id}.pdf"'})
 
