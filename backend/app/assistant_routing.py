@@ -59,6 +59,11 @@ INSTITUTIONAL = re.compile(
     r"|\b(?:schedule|dates?|deadlines?|polic(?:y|ies)|procedures?)\b.{0,35}\b(?:exams?|fees?|scholarships?|admissions?)\b",
     re.I,
 )
+GENERAL_LEARNING = re.compile(
+    r"\b(?:what is|what are|explain|define|difference between|how does|how do|"
+    r"help me understand|study plan|learn next|learn first)\b",
+    re.I,
+)
 PATTERNS = {
     "greeting": r"(?:hello|hi|hey|good (?:morning|afternoon|evening))(?: mawos)?",
     "thanks": r"(?:thank you(?: very much)?|thanks(?: a lot)?)",
@@ -125,6 +130,14 @@ def is_ambiguous_request(message):
         r"(?:how am i doing|tell me about my (?:records?|details)|"
         r"give me my (?:overview|summary)|what about (?:that|this)|explain it|"
         r"(?:can you )?(?:show|tell) me my|show my|what is my)", query))
+
+
+def is_general_learning_request(message):
+    """Detect study-concept tutoring requests that are outside MAWOS scope."""
+    query = normalize(message)
+    if is_institutional_request(query):
+        return False
+    return bool(GENERAL_LEARNING.search(query))
 
 
 def fee_structure_request(message):

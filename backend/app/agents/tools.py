@@ -70,64 +70,66 @@ _CAPABILITY_DETAILS = {
 _ROLE_CAPABILITY_COPY = {
     "student": {
         "title": "Student academic assistant",
-        "subtitle": "Your read-only records and grounded academic help",
+        "subtitle": "Your read-only records and MAWOS workflow help",
         "description": ("You may ask about your own attendance, fees, internal marks, and "
                         "hall-ticket eligibility and safe profile, search the read-only library catalogue, "
-                        "approved MAWOS explanations, and general learning questions."),
+                        "and approved MAWOS explanations."),
         "placeholder": "Ask about your academic information…",
         "record_group": "My records",
     },
     "faculty": {
         "title": "Faculty academic assistant",
-        "subtitle": "Assignment-scoped records and grounded academic help",
+        "subtitle": "Assignment-scoped records and MAWOS workflow help",
         "description": ("You may view attendance for students in your assigned classes and marks only "
-                        "for an authorized student and assigned subject. You may also ask approved academic "
-                        "and MAWOS questions, your authenticated safe profile, plus general learning questions. To find assigned subjects and student rosters, use the Faculty Dashboard."),
-        "placeholder": "Ask about an authorized student or academic topic…",
+                        "for an authorized student and assigned subject. You may also ask approved "
+                        "MAWOS questions and your authenticated safe profile. To find assigned "
+                        "subjects and student rosters, use the Faculty Dashboard."),
+        "placeholder": "Ask about an authorized student or MAWOS workflow…",
         "record_group": "Assigned students",
     },
     "hod": {
         "title": "HOD academic assistant",
-        "subtitle": "Department-scoped records and grounded academic help",
+        "subtitle": "Department-scoped records and MAWOS workflow help",
         "description": ("You may view attendance for students in your department and marks for a department "
                         "student when you provide a subject code assigned in that department. You may also ask "
-                        "for your own safe profile, department student and faculty counts, approved MAWOS questions and general learning questions."),
-        "placeholder": "Ask about department records, counts, or an academic topic…",
+                        "for your own safe profile, department student and faculty counts, and approved "
+                        "MAWOS questions."),
+        "placeholder": "Ask about department records, counts, or MAWOS workflow…",
         "record_group": "Department records",
     },
     "principal": {
         "title": "Principal academic assistant",
-        "subtitle": "Grounded academic and MAWOS help",
+        "subtitle": "Grounded MAWOS workflow help",
         "description": ("You may view your own safe profile. Other personal-record chat access is not "
                         "currently defined for the principal role. You may ask approved MAWOS questions "
-                        "and general learning questions."),
-        "placeholder": "Ask an academic or MAWOS question…",
+                        "within MAWOS scope."),
+        "placeholder": "Ask a MAWOS workflow question…",
         "record_group": "Record access",
     },
     "admin": {
         "title": "Admin academic assistant",
-        "subtitle": "Authorized read-only records and grounded academic help",
+        "subtitle": "Authorized read-only records and MAWOS workflow help",
         "description": ("You may view attendance and internal marks for a specified student under the current "
-                        "chat policy and your own safe profile. You may also ask approved MAWOS questions and general learning questions. Fees and "
+                        "chat policy and your own safe profile. You may also ask approved MAWOS questions. Fees and "
                         "hall-ticket eligibility are not available to admin through chat."),
-        "placeholder": "Ask about a supported student record or academic topic…",
+        "placeholder": "Ask about a supported student record or MAWOS workflow…",
         "record_group": "Supported records",
     },
     "parent": {
         "title": "Parent academic assistant",
-        "subtitle": "Linked-child records and grounded academic help",
+        "subtitle": "Linked-child records and MAWOS workflow help",
         "description": ("You may view records only for an actively linked child, including attendance, "
                         "fees, internal marks, hall-ticket eligibility, timetable, placements and "
-                        "scholarship status. You may also ask general learning and MAWOS questions."),
+                        "scholarship status. You may also ask MAWOS questions."),
         "placeholder": "Ask about your actively linked child's records…",
         "record_group": "Linked child records",
     },
     "librarian": {
         "title": "Librarian operations assistant",
-        "subtitle": "Read-only operational and learning help",
+        "subtitle": "Read-only operational and MAWOS workflow help",
         "description": ("You may ask about notifications, visible campus events, approved MAWOS "
-                        "information and general learning topics. Catalogue management remains in the Library workspace."),
-        "placeholder": "Ask an operational or learning question…",
+                        "information, and catalog operations scope. Catalogue management remains in the Library workspace."),
+        "placeholder": "Ask an operational or MAWOS workflow question…",
         "record_group": "Operations",
     },
 }
@@ -172,14 +174,10 @@ def assistant_capabilities(role: str, display_name: str | None = None) -> dict:
     elif role in {"principal", "admin", "librarian"}:
         record_prompts.extend(["Show my notifications", "Show visible campus events"])
     mawos_prompts = ["What is a CIE?", "What is MAWOS?"]
-    general_prompts = [
-        "Explain machine learning simply.", "What is SQL normalization?",
-        "Help me understand deadlocks.", "Create a short study plan.",
-    ]
     help_prompts = ["What can you help me with?", "Who are you?"]
     greeting_name = (display_name or "").strip()
     greeting = f"Hello {greeting_name}. {copy['description']}" if greeting_name else f"Hello! {copy['description']}"
-    examples = record_prompts[:2] + general_prompts[:1]
+    examples = record_prompts[:2] + mawos_prompts[:1]
     help_text = copy["description"]
     if examples:
         help_text += " Examples: " + " ".join(examples)
@@ -194,7 +192,6 @@ def assistant_capabilities(role: str, display_name: str | None = None) -> dict:
         ]})
     suggestion_groups.extend([
         {"label": "MAWOS help", "prompts": mawos_prompts},
-        {"label": "General learning", "prompts": general_prompts},
         {"label": "Assistant help", "prompts": help_prompts},
     ])
     return {
