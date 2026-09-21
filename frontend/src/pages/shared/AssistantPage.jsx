@@ -42,7 +42,7 @@ export default function AssistantPage() {
   return <AssistantConversation key={accountKey} token={token} user={user} accountKey={accountKey} />;
 }
 
-const SAFE_GENERAL_PROMPTS = ['Explain machine learning simply.', 'What is SQL normalization?', 'What is MAWOS?'];
+const SAFE_GENERAL_PROMPTS = ['What can you help me with?', 'What is MAWOS?'];
 const ROLE_VALUES = new Set(['student', 'faculty', 'hod', 'principal', 'admin', 'parent', 'librarian']);
 const MAX_STORED_MESSAGES = 50;
 const MAX_CONTEXT_MESSAGES = 8;

@@ -812,6 +812,15 @@ class OrchestratorAgent(BaseAgent):
             result = self._clarification_response(user, llm.IntentResult("profile_query", "scope", 0))
             result.update(category="clarification", source_label="Clarification")
             return result
+        if conversational.is_general_learning_request(message):
+            return conversational.response(
+                "unsupported",
+                ("This assistant is limited to MAWOS workflow automation and authorized "
+                 "real-time institutional records. It cannot explain study concepts or "
+                 "general-learning topics."),
+                source="Safe fallback",
+                reason="general-learning tutoring is out of MAWOS scope",
+            )
         return await self._handle_general_ai(message, conversation_context, user)
 
     async def _handle_record_chat(self, db, user, message: str) -> dict:
