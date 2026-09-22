@@ -213,6 +213,23 @@ def test_faculty_reschedule_request_requires_hod_confirmation_and_updates_safe_v
     assert d['db'].query(m.OperationEvent).filter_by(phase='CONFIRMED').count() >= 2
 
 
+def test_authorized_reviewer_can_discard_only_that_preview_without_timetable_changes(setup):
+    d = setup; run = generate(d); publish(d, run); entry = run['entries'][0]
+    source = dt.date.today()
+    while source.weekday() != entry['day']:
+        source += dt.timedelta(days=1)
+    preview = request(d, 'post', '/api/timetable/operations/preview', json={
+        'action': 'preview_cancel_class', 'entry_id': entry['id'],
+        'occurrence_date': source.isoformat()}).json()
+    discarded = request(d, 'post', f"/api/timetable/operations/previews/{preview['preview_id']}/discard")
+    assert discarded.status_code == 200 and discarded.json()['state'] == 'EXPIRED'
+    assert d['db'].query(m.OccurrenceChange).count() == 0
+    assert preview['preview_id'] not in {row['preview_id'] for row in request(
+        d, 'get', '/api/timetable/operations/pending').json()}
+    event = d['db'].query(m.OperationEvent).filter_by(preview_id=preview['preview_id'], phase='EXPIRED').one()
+    assert json.loads(event.after_summary) == {'reason': 'discarded_by_reviewer'}
+
+
 def test_cancel_preview_rechecks_and_prevents_duplicate_occurrence_changes(setup):
     d = setup
     run = generate(d); publish(d, run)

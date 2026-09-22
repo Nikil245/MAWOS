@@ -650,6 +650,31 @@ def my_assignments(db, user) -> list[dict]:
     return result
 
 
+def expire_occurrence_operation_previews(db, user, request, assignment):
+    """Retain, but invalidate, outstanding timetable changes for covered work."""
+    actions = ("preview_replacement_slot", "preview_cancel_class", "preview_reschedule_class")
+    previews = db.query(tm.OperationPreview).filter(
+        tm.OperationPreview.state == "PREVIEW", tm.OperationPreview.action.in_(actions)).all()
+    for preview in previews:
+        try:
+            body = json.loads(preview.request_json)
+        except (TypeError, ValueError):
+            continue
+        if (body.get("entry_id") != request.timetable_entry_id
+                or body.get("occurrence_date") != str(request.occurrence_date)):
+            continue
+        preview.state = "EXPIRED"
+        db.add(tm.OperationEvent(
+            correlation_id=preview.correlation_id, preview_id=preview.id, actor_id=user.id,
+            action=preview.action, phase="EXPIRED", dept_code=preview.dept_code,
+            requested_action=preview.request_json,
+            affected_records=json.dumps([{"type": "coverage_assignment", "id": assignment.id}],
+                                        sort_keys=True, separators=(",", ":")),
+            before_summary=preview.before_json,
+            after_summary=json.dumps({"reason": "accepted_coverage"}, sort_keys=True,
+                                     separators=(",", ":"))))
+
+
 def respond_assignment(db, user, assignment_id: int, accept: bool) -> tuple[dict, list[tuple[str, dict]]]:
     row = db.query(CoverageAssignment).filter_by(
         id=assignment_id, substitute_faculty_id=user.faculty_id).with_for_update().one_or_none()
@@ -667,6 +692,7 @@ def respond_assignment(db, user, assignment_id: int, accept: bool) -> tuple[dict
         if row.substitute_faculty_id not in eligible:
             fail(409, "This coverage proposal is no longer eligible.")
         row.status = "ACCEPTED"
+        expire_occurrence_operation_previews(db, user, request, row)
         event = "coverage.accepted"
     else:
         row.status = "DECLINED"; request.status = "CANDIDATES_AVAILABLE"

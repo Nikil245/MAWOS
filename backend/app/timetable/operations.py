@@ -279,6 +279,34 @@ def _event(preview, user, phase, affected, before, after=None):
         before_summary=_json(before), after_summary=_json(after or {}))
 
 
+def _expire_if_accepted_coverage(db, preview, user):
+    """Expire only a pending dated-change preview resolved by coverage."""
+    if preview.state != 'PREVIEW' or preview.action not in {
+            'preview_replacement_slot', 'preview_cancel_class', 'preview_reschedule_class'}:
+        return False
+    body = _load(preview.request_json)
+    entry_id, occurrence_date = body.get('entry_id'), body.get('occurrence_date')
+    if not entry_id or not isinstance(occurrence_date, str):
+        return False
+    try:
+        occurrence_date = dt.date.fromisoformat(occurrence_date)
+    except ValueError:
+        return False
+    covered = db.query(CoverageAssignment.id).join(
+        CoverageRequest, CoverageRequest.id == CoverageAssignment.coverage_request_id).filter(
+            CoverageAssignment.timetable_entry_id == entry_id,
+            CoverageAssignment.occurrence_date == occurrence_date,
+            CoverageAssignment.status == 'ACCEPTED',
+            CoverageRequest.status == 'APPROVED').first()
+    if not covered:
+        return False
+    preview.state = 'EXPIRED'
+    db.add(_event(preview, user, 'EXPIRED',
+                  [{'type': 'coverage_assignment', 'id': covered[0]}],
+                  _load(preview.before_json), {'reason': 'accepted_coverage'}))
+    return True
+
+
 def _create_preview(db, user, body, department, summary, before, affected, *, run_id=None, term_id=None):
     token = secrets.token_urlsafe(32)
     preview_id, correlation = str(uuid.uuid4()), str(uuid.uuid4())
@@ -394,6 +422,9 @@ def _authorized_preview(db, user, body):
                         and (user.role != 'hod' or row.dept_code == user.dept_code))
     if not owns and not delegated_review:
         raise HTTPException(404, 'Timetable operation preview not found.')
+    if _expire_if_accepted_coverage(db, row, user):
+        db.commit()
+        raise HTTPException(409, 'This preview expired because accepted coverage resolves the occurrence.')
     if row.state != 'PREVIEW':
         raise HTTPException(409, 'This preview was already used or expired.')
     now = m.now()
@@ -555,11 +586,27 @@ def pending_operations(user=Depends(reviewer), db=Depends(get_session)):
     query = db.query(m.OperationPreview).filter_by(state='PREVIEW')
     if user.role == 'hod':
         query = query.filter_by(dept_code=user.dept_code)
+    rows = query.order_by(m.OperationPreview.created_at).limit(100).all()
+    if any(_expire_if_accepted_coverage(db, row, user) for row in rows):
+        db.commit()
     return [{'preview_id': row.id, 'correlation_id': row.correlation_id,
              'action': row.action, 'department': row.dept_code,
              'requested_by': row.actor_id, 'summary': _load(row.preview_json),
-             'expires_at': row.expires_at} for row in query.order_by(
-                 m.OperationPreview.created_at).limit(100)]
+             'expires_at': row.expires_at} for row in rows if row.state == 'PREVIEW']
+
+
+@router.post('/previews/{preview_id}/discard')
+def discard_preview(preview_id: str, user=Depends(reviewer), db=Depends(get_session)):
+    row = db.query(m.OperationPreview).filter_by(id=preview_id).with_for_update().one_or_none()
+    if row is None or (user.role == 'hod' and row.dept_code != user.dept_code):
+        raise HTTPException(404, 'Timetable operation preview not found.')
+    if row.state != 'PREVIEW':
+        raise HTTPException(409, 'This preview was already used or expired.')
+    row.state = 'EXPIRED'
+    db.add(_event(row, user, 'EXPIRED', [], _load(row.before_json),
+                  {'reason': 'discarded_by_reviewer'}))
+    db.commit()
+    return {'preview_id': row.id, 'state': row.state}
 
 
 @router.post('/interpret')

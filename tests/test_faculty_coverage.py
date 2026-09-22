@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -387,6 +388,59 @@ def test_personal_timetable_exposes_accepted_coverage_as_a_dated_entry(coverage_
     assert entries[0]["dated_coverage"] is True
     assert entries[0]["subject_code"] == "CVR101"
     assert entries[0]["coverage_status"] == "ACCEPTED"
+
+
+def test_acceptance_expires_pending_occurrence_change_previews(coverage_world):
+    world = coverage_world; db = world["db"]; hod = world["users"]["Department HOD"]
+    substitute = world["users"]["Eligible"]; request = _approved_request(world)
+    preview = tm.OperationPreview(
+        id="coverage-preview", correlation_id="coverage-preview-correlation",
+        action="preview_replacement_slot", state="PREVIEW", actor_id=hod.id, dept_code="CVR",
+        request_json=json.dumps({"entry_id": world["entry"].id,
+                                 "occurrence_date": str(world["today"])}),
+        preview_json="{}", before_json="{}", token_hash="x" * 64,
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10))
+    db.add(preview); db.commit()
+    proposal, _ = service.approve_candidate(db, hod, request.id, substitute.faculty_id)
+    service.respond_assignment(db, substitute, proposal["assignment_id"], True); db.commit()
+    assert db.get(tm.OperationPreview, preview.id).state == "EXPIRED"
+    event = db.query(tm.OperationEvent).filter_by(preview_id=preview.id, phase="EXPIRED").one()
+    assert json.loads(event.after_summary) == {"reason": "accepted_coverage"}
+
+
+def test_pending_preview_read_reconciles_existing_accepted_coverage(coverage_world):
+    world = coverage_world; db = world["db"]; hod = world["users"]["Department HOD"]
+    substitute = world["users"]["Eligible"]; request = _approved_request(world)
+    proposal, _ = service.approve_candidate(db, hod, request.id, substitute.faculty_id)
+    service.respond_assignment(db, substitute, proposal["assignment_id"], True); db.commit()
+    preview = tm.OperationPreview(
+        id="11111111-1111-1111-1111-111111111111", correlation_id="22222222-2222-2222-2222-222222222222",
+        action="preview_cancel_class", state="PREVIEW", actor_id=hod.id, dept_code="CVR",
+        request_json=json.dumps({"entry_id": world["entry"].id,
+                                 "occurrence_date": str(world["today"])}),
+        preview_json="{}", before_json="{}", token_hash="x" * 64,
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10))
+    db.add(preview); db.commit()
+    client = TestClient(app)
+    assert client.get("/api/timetable/operations/pending", headers=_headers(hod)).json() == []
+    db.expire_all()
+    assert db.get(tm.OperationPreview, preview.id).state == "EXPIRED"
+    assert client.post("/api/timetable/operations/confirm", headers=_headers(hod), json={
+        "preview_id": preview.id, "confirmation_token": "x" * 43}).status_code == 409
+
+
+def test_pending_preview_with_invalid_date_is_left_unchanged(coverage_world):
+    world = coverage_world; db = world["db"]; hod = world["users"]["Department HOD"]
+    preview = tm.OperationPreview(
+        id="33333333-3333-3333-3333-333333333333", correlation_id="44444444-4444-4444-4444-444444444444",
+        action="preview_cancel_class", state="PREVIEW", actor_id=hod.id, dept_code="CVR",
+        request_json=json.dumps({"entry_id": world["entry"].id, "occurrence_date": "not-a-date"}),
+        preview_json="{}", before_json="{}", token_hash="x" * 64,
+        expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10))
+    db.add(preview); db.commit()
+    pending = TestClient(app).get("/api/timetable/operations/pending", headers=_headers(hod))
+    assert pending.status_code == 200
+    assert [row["preview_id"] for row in pending.json()] == [preview.id]
 
 
 def test_normal_attendance_occurrence_validation_and_holiday(coverage_world):
