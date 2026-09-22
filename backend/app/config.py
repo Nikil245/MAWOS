@@ -219,6 +219,27 @@ def database_backend() -> str:
     return make_url(DATABASE_URL).get_backend_name()
 
 
+def migration_database_url() -> str:
+    """Return the optional Alembic-only owner URL after strict validation.
+
+    FastAPI always uses ``DATABASE_URL``.  The entrypoint removes this value
+    before starting Uvicorn, so migration credentials cannot leak into the
+    application runtime environment.
+    """
+    configured_url = os.getenv("MAWOS_MIGRATION_DATABASE_URL")
+    if configured_url is None or not configured_url.strip():
+        return DATABASE_URL
+    try:
+        parsed = make_url(configured_url)
+    except Exception as exc:
+        raise ConfigurationError("MAWOS_MIGRATION_DATABASE_URL is invalid") from exc
+    if parsed.drivername != "postgresql+psycopg":
+        raise ConfigurationError(
+            "MAWOS_MIGRATION_DATABASE_URL must use postgresql+psycopg"
+        )
+    return configured_url
+
+
 def database_mode() -> str:
     """Return the explicitly selected database deployment target.
 

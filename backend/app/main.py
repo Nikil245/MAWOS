@@ -71,7 +71,9 @@ app.add_middleware(
 )
 from .timetable.api import router as timetable_router
 from .timetable import reads  # Register published-view routes.
+from .timetable.operations import router as timetable_operations_router
 app.include_router(timetable_router)
+app.include_router(timetable_operations_router)
 app.include_router(router)
 from .placement.api import router as placement_router
 app.include_router(placement_router)

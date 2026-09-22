@@ -20,6 +20,7 @@ from backend.app.main import app
 from backend.app.models import (Department, Faculty, LibrarianAccount, Notification,
                                 Parent, Student, Subject, TeachingAssignment, User)
 from backend.app.timetable import models as tm
+from backend.app.timetable import reads as timetable_reads
 
 
 @pytest.fixture()
@@ -163,6 +164,11 @@ def test_own_absence_and_role_boundaries(coverage_world):
     absence_id = response.json()["id"]
     assert client.post(f"/api/coverage/faculty/absences/{absence_id}/submit",
                        headers=_headers(original), json={}).status_code == 200
+    submitted = client.get("/api/coverage/hod/absence-queue",
+                           headers=_headers(world["users"]["Department HOD"]))
+    assert submitted.status_code == 200
+    assert [row["id"] for row in submitted.json()] == [absence_id]
+    assert submitted.json()[0]["status"] == "SUBMITTED"
     assert client.get("/api/coverage/hod/absence-queue",
                       headers=_headers(world["users"]["Other HOD"])).json() == []
     assert client.post(f"/api/coverage/absences/{absence_id}/review",
@@ -170,6 +176,98 @@ def test_own_absence_and_role_boundaries(coverage_world):
     for actor in (world["users"]["Student User"], world["users"]["Parent User"],
                   world["users"]["Librarian User"], world["users"]["Principal"]):
         assert client.get("/api/coverage/faculty/absences", headers=_headers(actor)).status_code == 403
+
+
+def test_queue_uses_submitter_role_not_another_account_on_the_faculty_profile(coverage_world):
+    """A historical HOD account must not escalate a faculty-account submission."""
+    world = coverage_world; db = world["db"]; client = TestClient(app)
+    faculty = world["faculty"]["Original"]
+    db.add(User(username="coverage-legacy-hod-link", password_hash=hash_password("Password123"),
+                role="hod", display_name="Historical HOD link", faculty_id=faculty.id,
+                dept_code="OTH"))
+    db.commit()
+    created = client.post("/api/coverage/faculty/absences", headers=_headers(world["users"]["Original"]), json={
+        "starts_on": str(world["today"]), "ends_on": str(world["today"]),
+        "reason_category": "PERSONAL"}).json()
+    assert client.post(f"/api/coverage/faculty/absences/{created['id']}/submit",
+                       headers=_headers(world["users"]["Original"]), json={}).status_code == 200
+    queue = client.get("/api/coverage/hod/absence-queue",
+                       headers=_headers(world["users"]["Department HOD"])).json()
+    assert [row["id"] for row in queue] == [created["id"]]
+    assert client.get("/api/coverage/escalations/absence-queue",
+                      headers=_headers(world["users"]["Principal"])).json() == []
+
+
+def test_hod_queue_excludes_non_submitted_and_routes_hod_absences_to_escalation(coverage_world):
+    world = coverage_world; client = TestClient(app); db = world["db"]
+    hod = world["users"]["Department HOD"]
+
+    def create(user):
+        response = client.post("/api/coverage/faculty/absences", headers=_headers(user), json={
+            "starts_on": str(world["today"]), "ends_on": str(world["today"]),
+            "reason_category": "PERSONAL"})
+        assert response.status_code == 201
+        return response.json()["id"]
+
+    draft_id = create(world["users"]["Eligible"])
+    rejected_id = create(world["users"]["Unavailable"])
+    assert client.post(f"/api/coverage/faculty/absences/{rejected_id}/submit",
+                       headers=_headers(world["users"]["Unavailable"]), json={}).status_code == 200
+    assert client.post(f"/api/coverage/absences/{rejected_id}/review", headers=_headers(hod),
+                       json={"decision": "REJECT"}).status_code == 200
+    cancelled_id = create(world["users"]["Conflicted"])
+    assert client.post(f"/api/coverage/faculty/absences/{cancelled_id}/submit",
+                       headers=_headers(world["users"]["Conflicted"]), json={}).status_code == 200
+    assert client.post(f"/api/coverage/faculty/absences/{cancelled_id}/cancel",
+                       headers=_headers(world["users"]["Conflicted"]), json={}).status_code == 200
+    hod_absence_id = create(hod)
+    assert client.post(f"/api/coverage/faculty/absences/{hod_absence_id}/submit",
+                       headers=_headers(hod), json={}).status_code == 200
+
+    assert client.get("/api/coverage/hod/absence-queue", headers=_headers(hod)).json() == []
+    escalated = client.get("/api/coverage/escalations/absence-queue",
+                           headers=_headers(world["users"]["Principal"])).json()
+    assert [row["id"] for row in escalated] == [hod_absence_id]
+    assert {db.get(FacultyAbsence, row_id).status for row_id in
+            (draft_id, rejected_id, cancelled_id)} == {"DRAFT", "REJECTED", "CANCELLED"}
+
+
+def test_submitted_absence_without_classes_is_reviewable_without_coverage_requests(coverage_world):
+    world = coverage_world; client = TestClient(app); db = world["db"]
+    hod = world["users"]["Department HOD"]
+
+    def submit(user):
+        created = client.post("/api/coverage/faculty/absences", headers=_headers(user), json={
+            "starts_on": str(world["today"]), "ends_on": str(world["today"]),
+            "reason_category": "PERSONAL"})
+        absence_id = created.json()["id"]
+        assert client.post(f"/api/coverage/faculty/absences/{absence_id}/submit",
+                           headers=_headers(user), json={}).status_code == 200
+        return absence_id
+
+    approve_id = submit(world["users"]["Eligible"])
+    reject_id = submit(world["users"]["Unavailable"])
+    queued = client.get("/api/coverage/hod/absence-queue", headers=_headers(hod)).json()
+    assert {row["id"] for row in queued} == {approve_id, reject_id}
+    assert client.post(f"/api/coverage/absences/{approve_id}/review", headers=_headers(hod),
+                       json={"decision": "APPROVE"}).status_code == 200
+    assert client.post(f"/api/coverage/absences/{reject_id}/review", headers=_headers(hod),
+                       json={"decision": "REJECT"}).status_code == 200
+    assert db.get(FacultyAbsence, approve_id).status == "APPROVED"
+    assert db.get(FacultyAbsence, reject_id).status == "REJECTED"
+    assert db.query(CoverageRequest).filter(CoverageRequest.absence_id.in_(
+        (approve_id, reject_id))).count() == 0
+
+
+def test_approval_generates_requests_only_for_published_affected_occurrences(coverage_world):
+    world = coverage_world; db = world["db"]; user = world["users"]["Original"]
+    absence, _ = service.create_absence(db, user, AbsenceCreate(
+        starts_on=world["today"], ends_on=world["today"], reason_category="MEDICAL"))
+    service.submit_absence(db, user, absence["id"])
+    service.review_absence(db, world["users"]["Department HOD"], absence["id"], "APPROVE")
+    requests = db.query(CoverageRequest).filter_by(absence_id=absence["id"]).all()
+    assert [(request.timetable_entry_id, request.occurrence_date) for request in requests] == [
+        (world["entry"].id, world["today"])]
 
 
 def test_hod_cannot_approve_self_as_substitute(coverage_world):
@@ -205,6 +303,21 @@ def test_candidates_are_deterministic_and_exclude_every_conflict(coverage_world)
     assert excluded.isdisjoint({row["name"] for row in rows})
 
 
+def test_approved_absence_exposes_all_confirmed_resolution_paths(coverage_world):
+    world = coverage_world
+    request = _approved_request(world)
+    queued = service.coverage_queue(world["db"], world["users"]["Department HOD"])
+    item = next(row for row in queued if row["id"] == request.id)
+    options = {row["kind"]: row for row in item["resolution_options"]}
+    assert set(options) == {"QUALIFIED_SUBSTITUTE", "REPLACEMENT_SLOT",
+                            "CANCEL_AND_MAKE_UP", "HOD_DECISION_REQUIRED"}
+    assert options["QUALIFIED_SUBSTITUTE"]["candidate_count"] == 1
+    assert options["REPLACEMENT_SLOT"]["operation"] == {
+        "action": "preview_replacement_slot", "entry_id": world["entry"].id,
+        "occurrence_date": str(world["today"])}
+    assert all(row["requires_confirmation"] for row in options.values())
+
+
 def test_approved_substitute_and_only_that_substitute_can_mark(coverage_world):
     world = coverage_world; db = world["db"]; request = _approved_request(world)
     hod = world["users"]["Department HOD"]; substitute = world["users"]["Eligible"]
@@ -232,6 +345,48 @@ def test_approved_substitute_and_only_that_substitute_can_mark(coverage_world):
                                                assignment["assignment_id"])
     with pytest.raises(HTTPException, match="correction workflow"):
         service.submit_attendance(db, substitute, body)
+
+
+def test_accepted_coverage_is_final_in_hod_queue_and_substitute_timetable(coverage_world):
+    world = coverage_world; db = world["db"]; hod = world["users"]["Department HOD"]
+    substitute = world["users"]["Eligible"]; request = _approved_request(world)
+    proposal, _ = service.approve_candidate(db, hod, request.id, substitute.faculty_id)
+    accepted, _ = service.respond_assignment(db, substitute, proposal["assignment_id"], True)
+    db.commit()
+
+    queued = next(row for row in service.coverage_queue(db, hod) if row["id"] == request.id)
+    assert queued["status"] == "APPROVED"
+    assert queued["coverage_assignment_status"] == accepted["status"] == "ACCEPTED"
+    assert queued["substitute_faculty"] == "Eligible"
+    assert queued["accepted_at"] is not None
+    assert queued["resolution_options"] == []
+    timetable = service.attendance_occurrences(db, substitute)
+    assert [(row["occurrence_id"], row["date"], row["marking_mode"]) for row in timetable] == [
+        (world["entry"].id, world["today"], "SUBSTITUTE")]
+    with pytest.raises(HTTPException, match="active coverage proposal"):
+        service.approve_candidate(db, hod, request.id, substitute.faculty_id)
+    with pytest.raises(HTTPException, match="Accepted coverage"):
+        service.decline_request(db, hod, request.id)
+    with pytest.raises(HTTPException, match="Accepted coverage"):
+        service.mark_unfilled(db, hod, request.id)
+    response = TestClient(app).post("/api/timetable/operations/preview", headers=_headers(hod), json={
+        "action": "preview_replacement_slot", "department": "CVR",
+        "entry_id": world["entry"].id, "occurrence_date": str(world["today"]),
+    })
+    assert response.status_code == 409
+
+
+def test_personal_timetable_exposes_accepted_coverage_as_a_dated_entry(coverage_world):
+    world = coverage_world; db = world["db"]; hod = world["users"]["Department HOD"]
+    substitute = world["users"]["Eligible"]; request = _approved_request(world)
+    proposal, _ = service.approve_candidate(db, hod, request.id, substitute.faculty_id)
+    service.respond_assignment(db, substitute, proposal["assignment_id"], True); db.commit()
+    now = dt.datetime.combine(world["today"], dt.time(8), service.TZ)
+    entries = timetable_reads.accepted_coverage_entries(db, substitute.faculty_id, now)
+    assert len(entries) == 1  # The read model supplies a dated entry, not a weekly slot.
+    assert entries[0]["dated_coverage"] is True
+    assert entries[0]["subject_code"] == "CVR101"
+    assert entries[0]["coverage_status"] == "ACCEPTED"
 
 
 def test_normal_attendance_occurrence_validation_and_holiday(coverage_world):

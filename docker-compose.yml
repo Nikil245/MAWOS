@@ -8,6 +8,10 @@ services:
     restart: unless-stopped
     environment:
       MAWOS_ENV: ${MAWOS_ENV:-development}
+      # Local runtime uses the restricted application account. Run reviewed
+      # schema changes explicitly with MAWOS_MIGRATION_DATABASE_URL instead.
+      # Render does not use this Compose file and retains production auto mode.
+      MAWOS_RUN_MIGRATIONS: ${MAWOS_RUN_MIGRATIONS:-false}
       MAWOS_DATABASE_MODE: ${MAWOS_DATABASE_MODE:?set MAWOS_DATABASE_MODE to external or docker in .env}
       MAWOS_JWT_SECRET: ${MAWOS_JWT_SECRET:-}
       MAWOS_SEED_DEMO_DATA: "false"

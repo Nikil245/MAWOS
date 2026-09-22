@@ -2,6 +2,7 @@
 import datetime as dt
 from sqlalchemy import (Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey,
                         ForeignKeyConstraint, Index, Integer, String, Text, Time, UniqueConstraint, text)
+from sqlalchemy import event
 from ..database import Base
 
 
@@ -168,3 +169,87 @@ class Audit(Base):
     event = Column(String(48), nullable=False)
     detail = Column(Text, nullable=False, default='{}')
     created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class OperationPreview(Base):
+    """Short-lived capability created by a validated timetable preview."""
+    __tablename__ = 'tt_operation_previews'
+    id = Column(String(36), primary_key=True)
+    correlation_id = Column(String(36), nullable=False, unique=True)
+    action = Column(String(48), nullable=False)
+    state = Column(String(16), nullable=False, default='PREVIEW')
+    actor_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    dept_code = Column(String(8), ForeignKey('departments.code'), nullable=False)
+    term_id = Column(Integer, ForeignKey('tt_terms.id'))
+    run_id = Column(Integer, ForeignKey('tt_runs.id'))
+    request_json = Column(Text, nullable=False)
+    preview_json = Column(Text, nullable=False)
+    before_json = Column(Text, nullable=False, default='{}')
+    token_hash = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    confirmed_at = Column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("state IN ('PREVIEW','CONFIRMED','EXPIRED')", name='ck_tt_operation_preview_state'),
+        Index('ix_tt_operation_actor_created', 'actor_id', 'created_at'),
+        Index('ix_tt_operation_scope_state', 'dept_code', 'state'),
+    )
+
+
+class OperationEvent(Base):
+    """Append-only security audit for previews and their confirmed effects."""
+    __tablename__ = 'tt_operation_events'
+    id = Column(Integer, primary_key=True)
+    correlation_id = Column(String(36), nullable=False)
+    preview_id = Column(String(36), ForeignKey('tt_operation_previews.id'), nullable=False)
+    actor_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    action = Column(String(48), nullable=False)
+    phase = Column(String(16), nullable=False)
+    dept_code = Column(String(8), ForeignKey('departments.code'), nullable=False)
+    requested_action = Column(Text, nullable=False)
+    affected_records = Column(Text, nullable=False, default='[]')
+    before_summary = Column(Text, nullable=False, default='{}')
+    after_summary = Column(Text, nullable=False, default='{}')
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    __table_args__ = (
+        CheckConstraint("phase IN ('PREVIEWED','CONFIRMED','REJECTED','EXPIRED')", name='ck_tt_operation_event_phase'),
+        UniqueConstraint('preview_id', 'phase', name='uq_tt_operation_event_phase'),
+        Index('ix_tt_operation_event_correlation', 'correlation_id'),
+        Index('ix_tt_operation_event_scope_created', 'dept_code', 'created_at'),
+    )
+
+
+@event.listens_for(OperationEvent, 'before_update')
+@event.listens_for(OperationEvent, 'before_delete')
+def _operation_event_is_append_only(*_):
+    raise ValueError('Timetable operation events are append-only.')
+
+
+class OccurrenceChange(Base):
+    """Immutable dated exception over a published weekly timetable entry."""
+    __tablename__ = 'tt_occurrence_changes'
+    id = Column(Integer, primary_key=True)
+    timetable_entry_id = Column(Integer, ForeignKey('tt_entries.id'), nullable=False)
+    timetable_run_id = Column(Integer, ForeignKey('tt_runs.id'), nullable=False)
+    term_id = Column(Integer, ForeignKey('tt_terms.id'), nullable=False)
+    dept_code = Column(String(8), ForeignKey('departments.code'), nullable=False)
+    occurrence_date = Column(Date, nullable=False)
+    action = Column(String(16), nullable=False)
+    replacement_date = Column(Date)
+    replacement_period_index = Column(Integer)
+    replacement_room_id = Column(Integer, ForeignKey('tt_rooms.id'))
+    correlation_id = Column(String(36), nullable=False)
+    applied_by = Column(Integer, ForeignKey('users.id'), nullable=False)
+    applied_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    __table_args__ = (
+        CheckConstraint("action IN ('RESCHEDULED','CANCELLED')", name='ck_tt_occurrence_change_action'),
+        CheckConstraint("(action = 'CANCELLED' AND replacement_date IS NULL AND replacement_period_index IS NULL AND replacement_room_id IS NULL) OR (action = 'RESCHEDULED' AND replacement_date IS NOT NULL AND replacement_period_index IS NOT NULL AND replacement_room_id IS NOT NULL)", name='ck_tt_occurrence_change_target'),
+        UniqueConstraint('timetable_entry_id', 'occurrence_date', name='uq_tt_occurrence_change_source'),
+        Index('ix_tt_occurrence_change_correlation', 'correlation_id'),
+        Index('ix_tt_occurrence_change_target', 'replacement_date', 'replacement_period_index'),
+        Index('uq_tt_occurrence_change_entry_target_date', 'timetable_entry_id',
+              'replacement_date', unique=True,
+              postgresql_where=text("action = 'RESCHEDULED'"),
+              sqlite_where=text("action = 'RESCHEDULED'")),
+        Index('ix_tt_occurrence_change_scope_date', 'dept_code', 'occurrence_date'),
+    )

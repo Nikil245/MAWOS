@@ -654,6 +654,22 @@ class OrchestratorAgent(BaseAgent):
             result = self._sensitive_input_response(user)
             result.update(category="sensitive_or_disallowed", source_label="Safe fallback")
             return result
+        timetable_command = re.search(
+            r"\b(?:generate|publish|reschedule|cancel|replace|replacement|conflicts?)\b.*\b(?:timetable|schedule|class|slot|draft)\b|"
+            r"\b(?:timetable|schedule|class|slot|draft)\b.*\b(?:generate|publish|reschedule|cancel|replace|replacement|conflicts?)\b",
+            message, re.I)
+        if timetable_command and user.role in {'faculty', 'hod', 'principal', 'admin'}:
+            route = ('/faculty/timetable' if user.role == 'faculty' else
+                     '/hod/timetable' if user.role == 'hod' else '/principal/timetable')
+            result = conversational.response(
+                'conversation',
+                ('I can prepare an allowlisted timetable action, but I cannot change records from free text. '
+                 'Open Timetable Operations, select the exact term or class, review the deterministic preview, '
+                 'and use the explicit confirmation control.'),
+                source='Deterministic answer')
+            result['actions'] = [{'label': 'Open Timetable Operations', 'route': route}]
+            result['routing']['reason'] = 'write-like timetable request routed to preview-only operations'
+            return result
         if conversational.DISALLOWED.search(message):
             capability = toolreg.assistant_capabilities(user.role)
             return conversational.response(

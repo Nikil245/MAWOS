@@ -16,7 +16,8 @@ class NotificationAgent(BaseAgent):
         self.bus.subscribe("attendance.scan", self.name, self.on_attendance_scan)
         self.bus.subscribe("scholarship.updated", self.name, self.on_scholarship_updated)
         self.bus.subscribe("admission.enrolled", self.name, self.on_admission_enrolled)
-        self.bus.subscribe("timetable.generated", self.name, self.on_timetable_generated)
+        self.bus.subscribe("timetable.proposal_generated", self.name,
+                           self.on_timetable_proposal_generated)
         self.bus.subscribe("placement.notification_required", self.name, self.on_placement_shortlisted)
 
     async def on_placement_shortlisted(self, payload):
@@ -130,15 +131,16 @@ class NotificationAgent(BaseAgent):
         finally:
             db.close()
 
-    async def on_timetable_generated(self, payload: dict):
+    async def on_timetable_proposal_generated(self, payload: dict):
         db = self.session()
         try:
-            self._notify(db, "Timetable published",
-                         f"Timetable regenerated for {payload['scope']} "
+            self._notify(db, "Timetable proposal ready",
+                         f"A proposal was generated for {payload['scope']} "
                          f"({payload['sections']} sections, "
                          f"{payload['placement_rate']}% slots placed, "
-                         f"solved in {payload['solve_ms']} ms).",
-                         role="faculty",
+                         f"solved in {payload['solve_ms']} ms). Review it in "
+                         "Timetable Operations before any version is published.",
+                         role="hod",
                          dept=None if payload["scope"] == "ALL" else payload["scope"])
             db.commit()
         finally:

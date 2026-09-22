@@ -744,6 +744,13 @@ def structure_response(result: dict, *, role: str, duration_ms: float) -> dict:
         "safe_trace": _safe_trace(result, role, duration_ms, intent),
         "refresh_required": bool(result.get("refresh_required", False)),
     })
+    # The legacy top-level action contract is intentionally library-only.
+    # Other safe internal routes are represented by validated link_action
+    # blocks and must not make the narrower compatibility model fail closed.
+    result["actions"] = [action for action in result.get("actions", [])
+                         if isinstance(action, dict) and re.fullmatch(
+                             r"/student/library(?:\?q=[^\s]*)?",
+                             str(action.get("route") or ""))]
     # Validate here as a fail-closed boundary before FastAPI serialization.
     # Legacy orchestrators occasionally carry internal-only keys; never expose
     # them merely because they were present in an intermediate dictionary.

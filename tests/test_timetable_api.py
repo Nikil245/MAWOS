@@ -1,5 +1,6 @@
 """Role boundaries and full draft/publication lifecycle on an isolated DB."""
 import json
+import datetime as dt
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -9,7 +10,7 @@ from backend.app.auth import create_token
 from backend.app.models import Notification
 from backend.app.database import Base, get_session
 from backend.app.main import app
-from backend.app.timetable import api as timetable_api, models as m, service as s, reads
+from backend.app.timetable import api as timetable_api, models as m, operations, service as s, reads
 from backend.app.timetable.solver import solve
 from timetable_fixtures import college
 
@@ -30,6 +31,7 @@ def setup(monkeypatch):
     app.dependency_overrides[get_session] = sessions
     # Solver process behavior is covered separately; HTTP lifecycle exercises pure solve here.
     monkeypatch.setattr(timetable_api, 'run_solver', lambda data, **kw: (solve(data, **kw), 1.0))
+    monkeypatch.setattr(operations, 'run_solver', lambda data, **kw: (solve(data, **kw), 1.0))
     data.update(db=db, engine=engine, factory=factory, client=TestClient(app))
     yield data
     app.dependency_overrides.pop(get_session, None)
@@ -51,6 +53,19 @@ def generate(data, **body):
     return r.json()
 
 
+def publish(data, run, role='hod'):
+    body = {'action': 'publish_timetable_draft', 'run_id': run['id']}
+    if role in {'admin', 'principal'}:
+        body['department'] = run['dept_code']
+    preview = request(data, 'post', '/api/timetable/operations/preview', role, json=body)
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    confirmed = request(data, 'post', '/api/timetable/operations/confirm', role, json={
+        'preview_id': payload['preview_id'], 'confirmation_token': payload['confirmation_token']})
+    assert confirmed.status_code == 200, confirmed.text
+    return confirmed.json()
+
+
 def test_complete_draft_is_not_published_until_explicit_action(setup):
     d = setup
     readiness = request(d, 'post', f"/api/hod/timetable/terms/{d['term'].id}/preflight")
@@ -58,8 +73,8 @@ def test_complete_draft_is_not_published_until_explicit_action(setup):
     run = generate(d)
     assert run['status'] == 'COMPLETE' and not run['conflicts']
     assert request(d, 'get', '/api/student/timetable', 'student').json()['published'] is False
-    response = request(d, 'post', f"/api/hod/timetable/runs/{run['id']}/publish")
-    assert response.status_code == 200 and response.json()['status'] == 'PUBLISHED'
+    response = publish(d, run)
+    assert response['result']['status'] == 'PUBLISHED'
     notices = d['db'].query(Notification).filter_by(notification_type='TIMETABLE_PUBLISHED').all()
     assert {notice.recipient_user_id for notice in notices} == {
         d['users']['student'].id, d['users']['faculty'].id}
@@ -67,6 +82,150 @@ def test_complete_draft_is_not_published_until_explicit_action(setup):
     assert weekly['published'] and len(weekly['weekly']) == 4
     assert weekly['weekly'][0]['faculty'] == 'Qualified Teacher'
     assert d['db'].query(m.Audit).filter_by(run_id=run['id']).count() == 3
+    assert d['db'].query(m.OperationEvent).filter_by(
+        action='publish_timetable_draft', phase='CONFIRMED').count() == 1
+    audit_response = request(d, 'get', '/api/timetable/operations/audit').json()
+    confirmed_audit = next(row for row in audit_response if row['phase'] == 'CONFIRMED')
+    assert confirmed_audit['actor_id'] == d['users']['hod'].id
+    assert confirmed_audit['requested_action']['action'] == 'publish_timetable_draft'
+    assert confirmed_audit['affected_records'] == [{'type': 'timetable_run', 'id': run['id']}]
+    audit_event = d['db'].query(m.OperationEvent).filter_by(phase='CONFIRMED').one()
+    audit_event.action = 'tampered'
+    with pytest.raises(ValueError, match='append-only'):
+        d['db'].commit()
+    d['db'].rollback()
+
+
+def test_legacy_publish_route_cannot_bypass_preview_confirmation(setup):
+    run = generate(setup)
+    response = request(setup, 'post', f"/api/hod/timetable/runs/{run['id']}/publish")
+    assert response.status_code == 409 and 'preview' in response.text.lower()
+    assert setup['db'].get(m.Run, run['id']).status == 'COMPLETE'
+
+
+def test_admin_can_preview_and_confirm_department_draft_generation(setup):
+    d = setup
+    published = generate(d, seed=13)
+    publish(d, published)
+    before_count = d['db'].query(m.Run).count()
+    preview = request(d, 'post', '/api/timetable/operations/preview', 'admin', json={
+        'action': 'generate_timetable_draft', 'term_id': d['term'].id,
+        'department': d['dept'], 'seed': 31})
+    assert preview.status_code == 200 and preview.json()['summary']['ready']
+    assert d['db'].query(m.Run).count() == before_count
+    confirmed = request(d, 'post', '/api/timetable/operations/confirm', 'admin', json={
+        'preview_id': preview.json()['preview_id'],
+        'confirmation_token': preview.json()['confirmation_token']})
+    assert confirmed.status_code == 200
+    result = confirmed.json()['result']
+    assert result['status'] == 'DRAFT'
+    draft = d['db'].get(m.Run, result['draft_run_id'])
+    assert draft.status == 'DRAFT'
+    assert d['db'].query(m.Entry).filter_by(run_id=draft.id).count() > 0
+    assert d['db'].query(m.Run).count() == before_count + 1
+    assert d['db'].get(m.Run, published['id']).status == 'PUBLISHED'
+    duplicate = request(d, 'post', '/api/timetable/operations/confirm', 'admin', json={
+        'preview_id': preview.json()['preview_id'],
+        'confirmation_token': preview.json()['confirmation_token']})
+    assert duplicate.status_code == 409
+    assert d['db'].query(m.Run).count() == before_count + 1
+    assert d['db'].query(m.OperationEvent).filter_by(
+        phase='CONFIRMED', action='generate_timetable_draft').count() == 1
+
+
+def test_admin_validates_and_publishes_confirmed_draft_without_changing_current_version_early(setup):
+    d = setup
+    old = generate(d, seed=13); publish(d, old)
+    generation = request(d, 'post', '/api/timetable/operations/preview', 'admin', json={
+        'action': 'generate_timetable_draft', 'term_id': d['term'].id, 'department': d['dept']}).json()
+    created = request(d, 'post', '/api/timetable/operations/confirm', 'admin', json={
+        'preview_id': generation['preview_id'], 'confirmation_token': generation['confirmation_token']}).json()
+    draft_id = created['result']['draft_run_id']
+    assert d['db'].get(m.Run, old['id']).status == 'PUBLISHED'
+    validation = request(d, 'post', '/api/timetable/operations/preview', 'admin', json={
+        'action': 'validate_timetable_draft', 'department': d['dept'], 'run_id': draft_id})
+    assert validation.status_code == 200
+    validated = request(d, 'post', '/api/timetable/operations/confirm', 'admin', json={
+        'preview_id': validation.json()['preview_id'], 'confirmation_token': validation.json()['confirmation_token']})
+    assert validated.status_code == 200 and validated.json()['result']['status'] == 'COMPLETE'
+    publication = request(d, 'post', '/api/timetable/operations/preview', 'admin', json={
+        'action': 'publish_timetable_draft', 'department': d['dept'], 'run_id': draft_id})
+    assert publication.status_code == 200
+    confirmed = request(d, 'post', '/api/timetable/operations/confirm', 'admin', json={
+        'preview_id': publication.json()['preview_id'], 'confirmation_token': publication.json()['confirmation_token']})
+    assert confirmed.status_code == 200
+    assert d['db'].get(m.Run, draft_id).status == 'PUBLISHED'
+    assert d['db'].get(m.Run, old['id']).status == 'ARCHIVED'
+
+
+def test_generation_and_confirmation_audit_commit_atomically(setup, monkeypatch):
+    d = setup
+    preview = request(d, 'post', '/api/timetable/operations/preview', 'admin', json={
+        'action': 'generate_timetable_draft', 'term_id': d['term'].id,
+        'department': d['dept']}).json()
+    original = operations._event
+
+    def fail_confirmation(row, user, phase, affected, before, after=None):
+        if phase == 'CONFIRMED':
+            raise RuntimeError('injected audit failure')
+        return original(row, user, phase, affected, before, after)
+
+    monkeypatch.setattr(operations, '_event', fail_confirmation)
+    response = request(d, 'post', '/api/timetable/operations/confirm', 'admin', json={
+        'preview_id': preview['preview_id'],
+        'confirmation_token': preview['confirmation_token']})
+    assert response.status_code == 500
+    assert d['db'].query(m.Run).count() == 0
+    assert d['db'].query(m.OperationEvent).filter_by(phase='CONFIRMED').count() == 0
+
+
+def test_operation_schema_rejects_identity_overrides_and_cross_department_scope(setup):
+    d = setup
+    forged = request(d, 'post', '/api/timetable/operations/preview', json={
+        'action': 'generate_timetable_draft', 'term_id': d['term'].id,
+        'actor_id': d['users']['admin'].id})
+    assert forged.status_code == 422
+    foreign = request(d, 'post', '/api/timetable/operations/preview', 'other_hod', json={
+        'action': 'get_timetable_conflicts', 'run_id': generate(d)['id']})
+    assert foreign.status_code == 404
+
+
+def test_faculty_reschedule_request_requires_hod_confirmation_and_updates_safe_view(setup):
+    d = setup
+    run = generate(d); publish(d, run)
+    entry = run['entries'][0]
+    source = dt.date.today()
+    while source.weekday() != entry['day']:
+        source += dt.timedelta(days=1)
+    proposed = request(d, 'post', '/api/timetable/operations/preview', 'faculty', json={
+        'action': 'preview_replacement_slot', 'entry_id': entry['id'],
+        'occurrence_date': source.isoformat()})
+    assert proposed.status_code == 200, proposed.text
+    assert d['db'].query(m.OccurrenceChange).count() == 0
+    pending = request(d, 'get', '/api/timetable/operations/pending').json()
+    assert proposed.json()['preview_id'] in {item['preview_id'] for item in pending}
+    confirmed = request(d, 'post', '/api/timetable/operations/confirm', json={
+        'preview_id': proposed.json()['preview_id']})
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()['result']['status'] == 'RESCHEDULED'
+    student = request(d, 'get', '/api/student/timetable', 'student').json()
+    assert student['changes'][0]['status'] == 'RESCHEDULED'
+    assert d['db'].query(m.OperationEvent).filter_by(phase='CONFIRMED').count() >= 2
+
+
+def test_cancel_preview_rechecks_and_prevents_duplicate_occurrence_changes(setup):
+    d = setup
+    run = generate(d); publish(d, run)
+    entry = run['entries'][0]
+    source = dt.date.today()
+    while source.weekday() != entry['day']:
+        source += dt.timedelta(days=1)
+    body = {'action': 'preview_cancel_class', 'entry_id': entry['id'],
+            'occurrence_date': source.isoformat()}
+    first = request(d, 'post', '/api/timetable/operations/preview', json=body).json()
+    assert request(d, 'post', '/api/timetable/operations/confirm', json={
+        'preview_id': first['preview_id'], 'confirmation_token': first['confirmation_token']}).status_code == 200
+    assert request(d, 'post', '/api/timetable/operations/preview', json=body).status_code == 409
 
 
 @pytest.mark.parametrize('role', ['student', 'faculty', 'admin', 'principal'])
@@ -128,7 +287,7 @@ def test_bootstrap_preview_authorization_and_forged_department(setup, monkeypatc
 def test_forged_student_and_faculty_identity_is_never_used(setup):
     d = setup
     run = generate(d)
-    request(d, 'post', f"/api/hod/timetable/runs/{run['id']}/publish")
+    publish(d, run)
     for role in ('student', 'faculty'):
         own = request(d, 'get', f'/api/{role}/timetable', role).json()
         forged = request(d, 'get', f'/api/{role}/timetable?faculty_id={d["outside"].id}&usn=forged&section=B', role).json()
@@ -152,7 +311,8 @@ def test_partial_run_cannot_publish_and_reports_missing_requirements(setup):
     d = setup
     run = generate(d, max_steps=100)
     assert run['status'] == 'PARTIAL' and run['unplaced']
-    response = request(d, 'post', f"/api/hod/timetable/runs/{run['id']}/publish")
+    response = request(d, 'post', '/api/timetable/operations/preview', json={
+        'action': 'publish_timetable_draft', 'run_id': run['id']})
     assert response.status_code == 409
     assert not request(d, 'get', '/api/student/timetable', 'student').json()['published']
 
@@ -162,7 +322,8 @@ def test_config_change_prevents_stale_publication(setup):
     run = generate(d)
     d['requirement'].periods_per_week = 5
     d['db'].commit()
-    assert request(d, 'post', f"/api/hod/timetable/runs/{run['id']}/publish").status_code == 409
+    assert request(d, 'post', '/api/timetable/operations/preview', json={
+        'action': 'publish_timetable_draft', 'run_id': run['id']}).status_code == 409
     checked = request(d, 'post', f"/api/hod/timetable/runs/{run['id']}/validate").json()
     assert 'stale_configuration' in {i['code'] for i in checked['conflicts']}
 
@@ -171,7 +332,7 @@ def test_second_publication_archives_first_and_history_is_immutable(setup):
     d = setup
     first, second = generate(d), generate(d, seed=22)
     for r in (first, second):
-        assert request(d, 'post', f"/api/hod/timetable/runs/{r['id']}/publish").status_code == 200
+        publish(d, r)
     history = request(d, 'get', '/api/timetable/runs').json()
     assert {r['id']: r['status'] for r in history} == {first['id']: 'ARCHIVED', second['id']: 'PUBLISHED'}
     for run in (first, second):
@@ -182,7 +343,7 @@ def test_second_publication_archives_first_and_history_is_immutable(setup):
 def test_every_personal_get_is_read_only_even_when_published(setup, monkeypatch):
     d = setup
     run = generate(d)
-    request(d, 'post', f"/api/hod/timetable/runs/{run['id']}/publish")
+    publish(d, run)
     def forbidden(*a, **kw):
         raise AssertionError('GET attempted a write')
     monkeypatch.setattr(Session, 'commit', forbidden)
@@ -216,13 +377,16 @@ def test_generation_and_publication_failures_rollback_every_row(setup, monkeypat
     assert d['db'].query(m.Run).count() == d['db'].query(m.Entry).count() == 0
     monkeypatch.setattr(s, 'audit', original)
     first, second = generate(d), generate(d, seed=8)
-    request(d, 'post', f"/api/hod/timetable/runs/{first['id']}/publish")
+    publish(d, first)
     def fail_publish(db, user, event, **kw):
         if event == 'timetable.published':
             raise RuntimeError('SECRET publication failure')
         return original(db, user, event, **kw)
     monkeypatch.setattr(s, 'audit', fail_publish)
-    response = request(d, 'post', f"/api/hod/timetable/runs/{second['id']}/publish")
+    preview = request(d, 'post', '/api/timetable/operations/preview', json={
+        'action': 'publish_timetable_draft', 'run_id': second['id']}).json()
+    response = request(d, 'post', '/api/timetable/operations/confirm', json={
+        'preview_id': preview['preview_id'], 'confirmation_token': preview['confirmation_token']})
     assert response.status_code == 500 and 'SECRET' not in response.text
     d['db'].expire_all()
     assert d['db'].get(m.Run, first['id']).status == 'PUBLISHED'

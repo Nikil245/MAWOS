@@ -111,14 +111,17 @@ All endpoints use the existing JWT authentication, `/api` prefix, controlled `de
 | HOD/Admin/Principal | `GET /timetable/runs/{run}` | Status, metrics, conflicts, missing requirements and preview |
 | HOD | `POST /hod/timetable/runs/{run}/validate` | Independent validation |
 | HOD | `PATCH /hod/timetable/runs/{run}/entries/{entry}/lock` | Lock/unlock entire occurrence |
-| HOD | `POST /hod/timetable/runs/{run}/publish` | Explicit atomic publication |
+| HOD | `POST /hod/timetable/runs/{run}/publish` | Disabled compatibility route; directs callers to secure operations |
+| Faculty/HOD/Principal/Admin | `POST /timetable/operations/preview` | Strict allowlisted preview; faculty limited to own reschedule requests |
+| HOD/Principal/Admin | `POST /timetable/operations/confirm` | Revalidate and explicitly apply a preview |
+| HOD/Principal/Admin | `GET /timetable/operations/pending`, `/audit` | Scoped review queue and operational audit |
 | Student | `GET /student/timetable` | Own published weekly/today/current/next data |
 | Faculty/HOD | `GET /faculty/timetable` | Own published teaching data |
-| Principal/Admin | `GET /principal/timetable/overview` | Read-only coverage and publication status |
+| Principal/Admin | `GET /principal/timetable/overview` | Institution-wide coverage and version status |
 
 Personal timetable paths also support `/weekly`, `/today`, and `/current-next` suffixes; each returns the same coherent view contract. Student and faculty identity parameters are never accepted as authority. All these GET routes suppress autoflush and perform no writes, flushes or commits.
 
-The existing `/timetable/{dept}/{year}/{section}` and CSV endpoints now use published versions and role filtering. Student/faculty dashboard timetable data and the assistant’s timetable tool use the same published source. Legacy `/hod/generate-timetable` and `/hod/generate-timetable-live` return `410` directing users to the versioned workflow. Legacy research solvers remain available to research code. Startup does not generate timetable data.
+The existing `/timetable/{dept}/{year}/{section}` and CSV endpoints now use published versions and role filtering. Student/faculty dashboard timetable data and the assistant’s timetable tool use the same published source. Legacy `/hod/generate-timetable` and `/hod/generate-timetable-live` return `410` directing users to the versioned workflow. Legacy research solvers are proposal-only and cannot write timetable rows. Startup does not generate timetable data.
 
 Current/next calculations use timezone-aware `Asia/Kolkata` datetimes. Current means `starts_at <= now < ends_at`. Next means a later start, continuing across weekdays, weekends, holidays and future published terms. Returned classes include code/name, faculty display name, room, section, date/day and start/end times. No active published term, holidays, free periods/breaks and no remaining classes have explicit empty messages. Partial or latest drafts are never substituted for publication.
 
@@ -129,7 +132,7 @@ The existing React layouts and authorization gates are retained. Routes:
 - `/hod/timetable`: configuration, readiness, generation, result metrics, conflicts, unplaced demand, history, section preview, locks, validation and explicit publication.
 - `/student/timetable`, `/faculty/timetable`: current/next cards, today’s classes and responsive weekly cards; faculty availability editor.
 - `/admin/timetable`: academic terms, normalized period template, holidays and rooms.
-- `/principal/timetable`: read-only coverage distinguishing the latest draft status from the published version.
+- `/principal/timetable`: institution-wide draft/publication previews, confirmation controls, coverage and operational audit history.
 
 Pending action gates use both an immediate ref and disabled controls to prevent duplicate clicks. Personal views refresh every 30 seconds without unmounting the availability editor on successful refresh. Loading, controlled errors and empty states are covered by component tests. React performs no authoritative scheduling or hard-constraint validation.
 
@@ -153,11 +156,11 @@ Verification results and complete modified-file inventory are in [TIMETABLE_VERI
 
 ## Current limits
 
-- Rooms and teachers are department-owned for scheduling. Shared cross-department teaching/resources and institution-wide publication are intentionally rejected; admin has configuration authority, while publication remains with the department HOD.
+- Rooms and teachers are department-owned for scheduling. Principal/Admin can operate across departments, but shared cross-department resources require a future institution-owned resource model.
 - After the first publication in a term, its periods, holidays, sections, requirements, load limits and availability cannot be changed through these APIs. Configure the next term separately. Existing teaching assignments referenced by publication history cannot be reassigned; supporting historical staffing changes requires a further versioned-assignment design.
 - The guarded bootstrap may derive sections and qualifications from enrolled students and authorized teaching assignments. Weekly demand still requires an existing requirement, an explicit fixed value, or explicit opt-in to subject credits; legacy `timetable_slots` are never imported.
 - Generation is request-bound. Run-status reads expose saved results; there is no durable background queue, in-flight run ID, or live progress stream. Invalid preflight and worker failures save no run. The database status vocabulary reserves `DRAFT`, `GENERATING` and `FAILED`; successful persistence currently produces `COMPLETE` or `PARTIAL`.
 - Search is bounded and heuristic. Partial output is diagnostic and cannot publish; it is not a proof that a feasible timetable does not exist, and soft-score optimality is not guaranteed.
-- Period and holiday authoring uses weekly recurrence plus whole-day closures; alternating-week patterns and one-off substituted classes are not supported. Faculty preferences beyond hard availability are not exposed.
+- Period and holiday authoring uses weekly recurrence plus whole-day closures. Dated reschedule/cancellation exceptions are supported; alternating-week base patterns and faculty preferences beyond hard availability are not exposed.
 - Resource editing/deletion is deliberately limited: rooms can be created and their term availability managed; qualification records can be added. Historical timetable versions are never deleted by the application.
 - No browser or live deployment verification was performed. Production build reports Vite’s existing large-bundle advisory; the scholarship test suite emits existing React `act(...)` warnings.

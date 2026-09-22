@@ -34,8 +34,17 @@ def faculty_user(db, faculty_id: int) -> User | None:
                                       User.role.desc(), User.id).first())
 
 
-def is_hod_faculty(db, faculty_id: int) -> bool:
-    return db.query(User.id).filter(User.faculty_id == faculty_id, User.role == "hod").first() is not None
+def is_hod_submission(db, absence: FacultyAbsence) -> bool:
+    """Return the approval route selected by the submitting account.
+
+    A faculty record can be referenced by more than one account over its
+    lifetime (for example, a historical HOD account).  Routing from that
+    record incorrectly sends a regular faculty submission to escalation and
+    removes it from the department HOD queue.  The immutable submitter on the
+    absence is the workflow authority instead.
+    """
+    submitter = db.get(User, absence.submitted_by)
+    return submitter is not None and submitter.role == "hod"
 
 
 def audit(db, user, action, *, absence=None, request=None, occurrence_item=None,
@@ -96,11 +105,20 @@ def occurrence(db, entry_id: int, date: dt.date) -> dict:
     run = db.get(tm.Run, entry.run_id)
     term = db.get(tm.Term, entry.term_id)
     section = db.get(tm.Section, entry.section_id)
+    change = db.query(tm.OccurrenceChange).filter_by(
+        timetable_entry_id=entry.id, occurrence_date=date).one_or_none()
+    replacement = db.query(tm.OccurrenceChange).filter_by(
+        timetable_entry_id=entry.id, replacement_date=date,
+        action='RESCHEDULED').one_or_none()
+    if change is not None:
+        fail(409, "This occurrence was cancelled or rescheduled and is no longer active.")
+    effective_day = date.weekday()
+    effective_period = replacement.replacement_period_index if replacement else entry.period_index
     period = (db.query(tm.PeriodDefinition).filter_by(
-        term_id=entry.term_id, day_of_week=entry.day_of_week,
-        period_index=entry.period_index).one_or_none())
+        term_id=entry.term_id, day_of_week=effective_day,
+        period_index=effective_period).one_or_none())
     if (term is None or section is None or period is None or date < term.starts_on
-            or date > term.ends_on or date.weekday() != entry.day_of_week
+            or date > term.ends_on or (replacement is None and date.weekday() != entry.day_of_week)
             or period.is_break or period.is_closed):
         fail(409, "The requested class is not an active published timetable occurrence.")
     if db.query(tm.Holiday.id).filter_by(term_id=term.id, date=date).first():
@@ -111,6 +129,7 @@ def occurrence(db, entry_id: int, date: dt.date) -> dict:
         "semester": section.semester, "section_name": section.name,
         "subject_code": entry.subject_code, "original_faculty_id": entry.faculty_id,
         "start_time": period.starts_at, "end_time": period.ends_at,
+        "occurrence_change_id": replacement.id if replacement else None,
     }
 
 
@@ -286,7 +305,7 @@ def review_queue(db, user, *, escalated=False) -> list[dict]:
             fail(403, "Principal or Admin approval is required.")
         query = db.query(FacultyAbsence).filter(FacultyAbsence.status == "SUBMITTED")
         rows = [row for row in query.order_by(FacultyAbsence.starts_on).all()
-                if is_hod_faculty(db, row.faculty_id)]
+                if is_hod_submission(db, row)]
     else:
         if user.role != "hod":
             fail(403, "HOD approval is required.")
@@ -294,13 +313,13 @@ def review_queue(db, user, *, escalated=False) -> list[dict]:
                 .filter(Faculty.dept_code == user.dept_code,
                         FacultyAbsence.status == "SUBMITTED").order_by(
                             FacultyAbsence.starts_on).all())
-        rows = [row for row in rows if not is_hod_faculty(db, row.faculty_id)]
+        rows = [row for row in rows if not is_hod_submission(db, row)]
     return [absence_record(db, row, private=True) for row in rows]
 
 
 def authorize_reviewer(db, user, row: FacultyAbsence):
     faculty = db.get(Faculty, row.faculty_id)
-    target_is_hod = is_hod_faculty(db, row.faculty_id)
+    target_is_hod = is_hod_submission(db, row)
     if user.id == row.submitted_by or user.faculty_id == row.faculty_id:
         fail(403, "You cannot review your own absence.")
     if target_is_hod:
@@ -378,7 +397,7 @@ def request_scope(db, user, request_id: int, lock=False) -> tuple[CoverageReques
         fail(404, "Coverage request not found.")
     absence = db.get(FacultyAbsence, request.absence_id)
     faculty = db.get(Faculty, request.original_faculty_id)
-    target_is_hod = is_hod_faculty(db, request.original_faculty_id)
+    target_is_hod = is_hod_submission(db, absence)
     if target_is_hod:
         if user.role not in {"principal", "admin"}:
             fail(404, "Coverage request not found in your authorized scope.")
@@ -401,7 +420,12 @@ def coverage_queue(db, user, *, escalated=False) -> list[dict]:
     result = []
     for row in rows:
         faculty = db.get(Faculty, row.original_faculty_id)
-        target_is_hod = is_hod_faculty(db, row.original_faculty_id)
+        absence = db.get(FacultyAbsence, row.absence_id)
+        if absence is None:
+            # The foreign key guarantees this in normal operation; retaining
+            # the guard keeps a malformed historical row out of every queue.
+            continue
+        target_is_hod = is_hod_submission(db, absence)
         if target_is_hod != escalated:
             continue
         if not escalated and faculty.dept_code != user.dept_code:
@@ -412,8 +436,36 @@ def coverage_queue(db, user, *, escalated=False) -> list[dict]:
             # A superseded timetable version is not actionable. GET remains
             # read-only; an authorized cancellation action retains history.
             continue
-        result.append({"id": row.id, "status": row.status,
-                       **occurrence_record(db, item)})
+        accepted = db.query(CoverageAssignment).filter_by(
+            coverage_request_id=row.id, status="ACCEPTED").one_or_none()
+        assignment = {}
+        if accepted:
+            substitute = db.get(Faculty, accepted.substitute_faculty_id)
+            assignment = {"coverage_assignment_status": accepted.status,
+                          "coverage_assignment_id": accepted.id,
+                          "substitute_faculty_id": accepted.substitute_faculty_id,
+                          "substitute_faculty": substitute.name if substitute else "Faculty",
+                          "accepted_at": accepted.responded_at}
+        eligible = [] if accepted else candidates(db, user, row.id, mutate_status=False)
+        result.append({"id": row.id, "status": row.status, **assignment,
+                       **occurrence_record(db, item),
+                       "resolution_options": [] if accepted else [
+                           {"kind": "QUALIFIED_SUBSTITUTE", "available": bool(eligible),
+                            "candidate_count": len(eligible),
+                            "requires_confirmation": True},
+                           {"kind": "REPLACEMENT_SLOT", "available": True,
+                            "requires_confirmation": True,
+                            "operation": {"action": "preview_replacement_slot",
+                                          "entry_id": row.timetable_entry_id,
+                                          "occurrence_date": str(row.occurrence_date)}},
+                           {"kind": "CANCEL_AND_MAKE_UP", "available": True,
+                            "requires_confirmation": True,
+                            "operation": {"action": "preview_cancel_class",
+                                          "entry_id": row.timetable_entry_id,
+                                          "occurrence_date": str(row.occurrence_date)}},
+                           {"kind": "HOD_DECISION_REQUIRED", "available": True,
+                            "requires_confirmation": True},
+                       ]})
     return result
 
 
@@ -444,7 +496,7 @@ def candidates(db, user, request_id: int, *, mutate_status=True) -> list[dict]:
                      .filter(tm.Run.status == "PUBLISHED", tm.Entry.term_id == item["term"].id,
                              tm.Entry.faculty_id == faculty.id,
                              tm.Entry.day_of_week == item["date"].weekday(),
-                             tm.Entry.period_index == item["entry"].period_index).first())
+                             tm.Entry.period_index == item["period"].period_index).first())
         if scheduled:
             continue
         coverage_conflict = (db.query(CoverageAssignment.id).join(
@@ -655,6 +707,12 @@ def attendance_occurrences(db, user) -> list[dict]:
                .join(tm.Term, tm.Term.id == tm.Entry.term_id)
                .filter(tm.Run.status == "PUBLISHED", tm.Term.starts_on <= today,
                        tm.Term.ends_on >= today, tm.Entry.day_of_week == today.weekday()).all())
+    moved_ids = [entry_id for entry_id, in db.query(tm.OccurrenceChange.timetable_entry_id).filter_by(
+        action="RESCHEDULED", replacement_date=today).all()]
+    if moved_ids:
+        moved = (db.query(tm.Entry).join(tm.Run, tm.Run.id == tm.Entry.run_id)
+                 .filter(tm.Run.status == "PUBLISHED", tm.Entry.id.in_(moved_ids)).all())
+        entries.extend(entry for entry in moved if entry.id not in {item.id for item in entries})
     permitted = []
     for entry in entries:
         try:

@@ -24,7 +24,7 @@ def digest(value):
 
 
 def scope(user, dept, *, write=False):
-    if user.role in ('principal', 'admin') and not write:
+    if user.role in ('principal', 'admin'):
         return
     if user.role != 'hod' or user.dept_code != dept:
         raise HTTPException(404, 'Timetable scope not found.')
@@ -53,8 +53,7 @@ def atomic(db):
     It is held only for DB work, never for CPU solving.
     """
     try:
-        if db.bind.dialect.name == 'postgresql':
-            db.execute(text('SELECT pg_advisory_xact_lock(734091208)'))
+        acquire_mutation_lock(db)
         yield
         db.commit()
     except HTTPException:
@@ -68,6 +67,12 @@ def atomic(db):
         db.rollback()
         log.exception('Timetable operation failed')
         raise HTTPException(500, 'Timetable operation failed. Retry or contact an administrator.') from None
+
+
+def acquire_mutation_lock(db):
+    """Serialize a caller-managed timetable mutation transaction."""
+    if db.bind.dialect.name == 'postgresql':
+        db.execute(text('SELECT pg_advisory_xact_lock(734091208)'))
 
 
 def audit(db, user, event, *, run=None, term_id=None, dept=None, detail=None):
@@ -183,34 +188,48 @@ def describe_run(db, run, *, entries=True):
     return result
 
 
+def stage_persist(db, user, term_id, dept, seed, data, bundle, result, elapsed_ms,
+                  parent_id=None, parent_fingerprint=None, *, initial_draft=False):
+    """Stage a generated version in the caller's locked transaction."""
+    scope(user, dept, write=True)
+    _, current, errors = snapshot(db, term_id, dept)
+    if digest(current) != digest(bundle) or errors:
+        raise HTTPException(409, 'Configuration changed during generation. Run preflight and generate again.')
+    if parent_id:
+        parent = get_run(db, user, parent_id, write=True)
+        if parent.status not in EDITABLE or digest([e.model_dump() for e in map(entry_contract, run_entries(db, parent))]) != parent_fingerprint:
+            raise HTTPException(409, 'Source draft changed during generation. Refresh and retry.')
+    hard = validate(data, result.entries)
+    partial_hard = validate(data, result.entries, complete=False)
+    if partial_hard:
+        raise HTTPException(422, 'Generated entries failed independent validation; no run was saved.')
+    metrics = {k: getattr(result, k) for k in ('steps', 'search_conflicts', 'backtracks', 'restarts', 'score', 'termination')}
+    metrics.update(duration_ms=elapsed_ms, placed=len(result.entries), required=sum(r.periods for r in data.requirements), hard_violations=len(hard))
+    # Operation-confirmed generation is deliberately staged as DRAFT.  A
+    # separate reviewed validation changes it to COMPLETE/PARTIAL; direct HOD
+    # generation retains its established immediately-validated workflow.
+    status = 'DRAFT' if initial_draft else ('COMPLETE' if not hard else 'PARTIAL')
+    run = m.Run(term_id=term_id, dept_code=dept, status=status, seed=seed,
+                input_snapshot=encoded(bundle), input_hash=digest(bundle), metrics=encoded(metrics),
+                conflicts=encoded([i.model_dump() for i in hard]), unplaced=encoded([u.model_dump() for u in result.unplaced]),
+                created_by=user.id, validated_by=None if initial_draft else user.id,
+                validated_at=None if initial_draft else m.now(), parent_run_id=parent_id)
+    db.add(run)
+    db.flush()
+    for e in result.entries:
+        db.add(m.Entry(run_id=run.id, term_id=term_id, dept_code=dept, requirement_id=e.requirement_id,
+                       occurrence=e.occurrence, section_id=e.section_id, subject_code=e.subject, faculty_id=e.faculty_id,
+                       room_id=e.room_id, day_of_week=e.day, period_index=e.period_index, locked=e.locked))
+    audit(db, user, 'timetable.generated', run=run, detail=metrics)
+    if not initial_draft:
+        audit(db, user, 'timetable.validated', run=run, detail={'hard_violations': len(hard)})
+    return run
+
+
 def persist(db, user, term_id, dept, seed, data, bundle, result, elapsed_ms, parent_id=None, parent_fingerprint=None):
     with atomic(db):
-        scope(user, dept, write=True)
-        _, current, errors = snapshot(db, term_id, dept)
-        if digest(current) != digest(bundle) or errors:
-            raise HTTPException(409, 'Configuration changed during generation. Run preflight and generate again.')
-        if parent_id:
-            parent = get_run(db, user, parent_id, write=True)
-            if parent.status not in EDITABLE or digest([e.model_dump() for e in map(entry_contract, run_entries(db, parent))]) != parent_fingerprint:
-                raise HTTPException(409, 'Source draft changed during generation. Refresh and retry.')
-        hard = validate(data, result.entries)
-        partial_hard = validate(data, result.entries, complete=False)
-        if partial_hard:
-            raise HTTPException(422, 'Generated entries failed independent validation; no run was saved.')
-        metrics = {k: getattr(result, k) for k in ('steps', 'search_conflicts', 'backtracks', 'restarts', 'score', 'termination')}
-        metrics.update(duration_ms=elapsed_ms, placed=len(result.entries), required=sum(r.periods for r in data.requirements), hard_violations=len(hard))
-        run = m.Run(term_id=term_id, dept_code=dept, status='COMPLETE' if not hard else 'PARTIAL', seed=seed,
-                    input_snapshot=encoded(bundle), input_hash=digest(bundle), metrics=encoded(metrics),
-                    conflicts=encoded([i.model_dump() for i in hard]), unplaced=encoded([u.model_dump() for u in result.unplaced]),
-                    created_by=user.id, validated_by=user.id, validated_at=m.now(), parent_run_id=parent_id)
-        db.add(run)
-        db.flush()
-        for e in result.entries:
-            db.add(m.Entry(run_id=run.id, term_id=term_id, dept_code=dept, requirement_id=e.requirement_id,
-                           occurrence=e.occurrence, section_id=e.section_id, subject_code=e.subject, faculty_id=e.faculty_id,
-                           room_id=e.room_id, day_of_week=e.day, period_index=e.period_index, locked=e.locked))
-        audit(db, user, 'timetable.generated', run=run, detail=metrics)
-        audit(db, user, 'timetable.validated', run=run, detail={'hard_violations': len(hard)})
+        run = stage_persist(db, user, term_id, dept, seed, data, bundle, result,
+                            elapsed_ms, parent_id, parent_fingerprint)
     return describe_run(db, run)
 
 
@@ -228,19 +247,25 @@ def check_run(db, run):
     return list({(e.code, e.message, e.requirement_id): e for e in errors}.values())
 
 
+def stage_validate_run(db, user, run_id):
+    """Validate a draft inside a caller-owned mutation transaction."""
+    run = get_run(db, user, run_id, write=True)
+    if run.status not in EDITABLE:
+        raise HTTPException(409, 'Only drafts can be validated for publication.')
+    issues = check_run(db, run)
+    run.status = 'COMPLETE' if not issues else 'PARTIAL'
+    run.conflicts = encoded([i.model_dump() for i in issues])
+    run.validated_by, run.validated_at = user.id, m.now()
+    metrics = json.loads(run.metrics)
+    metrics['hard_violations'] = len(issues)
+    run.metrics = encoded(metrics)
+    audit(db, user, 'timetable.validated', run=run, detail={'hard_violations': len(issues)})
+    return run
+
+
 def validate_run(db, user, run_id):
     with atomic(db):
-        run = get_run(db, user, run_id, write=True)
-        if run.status not in EDITABLE:
-            raise HTTPException(409, 'Only drafts can be validated for publication.')
-        issues = check_run(db, run)
-        run.status = 'COMPLETE' if not issues else 'PARTIAL'
-        run.conflicts = encoded([i.model_dump() for i in issues])
-        run.validated_by, run.validated_at = user.id, m.now()
-        metrics = json.loads(run.metrics)
-        metrics['hard_violations'] = len(issues)
-        run.metrics = encoded(metrics)
-        audit(db, user, 'timetable.validated', run=run, detail={'hard_violations': len(issues)})
+        run = stage_validate_run(db, user, run_id)
     return describe_run(db, run)
 
 
@@ -264,29 +289,35 @@ def lock_entry(db, user, run_id, entry_id, locked):
     return describe_run(db, run)
 
 
+def stage_publish(db, user, run_id):
+    """Stage a validated publication in the caller's transaction."""
+    run = get_run(db, user, run_id, write=user.role == 'hod')
+    if run.status != 'COMPLETE':
+        raise HTTPException(409, 'Only a COMPLETE draft can be published.')
+    issues = check_run(db, run)
+    if issues:
+        raise HTTPException(409, 'Publication validation failed. Validate the draft to review conflicts.')
+    previous = db.query(m.Run).filter_by(term_id=run.term_id, dept_code=run.dept_code, status='PUBLISHED').all()
+    for old in previous:
+        old.status = 'ARCHIVED'
+        audit(db, user, 'timetable.archived', run=old, detail={'replaced_by': run.id})
+    db.flush()  # Archive before assigning the partial unique-index key.
+    run.status, run.published_by, run.published_at = 'PUBLISHED', user.id, m.now()
+    run.validated_by, run.validated_at = user.id, m.now()
+    audit(db, user, 'timetable.published', run=run)
+    term_row = term(db, run.term_id)
+    common = dict(
+        title='Timetable published',
+        message=f'{term_row.name} timetable version {run.id} is now published for {run.dept_code}.',
+        notification_type='TIMETABLE_PUBLISHED', source_agent='timetable_service',
+        event_key=f'timetable_published:{run.id}',
+        related_entity_type='timetable_run', related_entity_id=run.id)
+    notify_role(db, 'student', dept=run.dept_code, route='/student/timetable', **common)
+    notify_role(db, 'faculty', dept=run.dept_code, route='/faculty/timetable', **common)
+    return run
+
+
 def publish(db, user, run_id):
     with atomic(db):
-        run = get_run(db, user, run_id, write=True)
-        if run.status != 'COMPLETE':
-            raise HTTPException(409, 'Only a COMPLETE draft can be published.')
-        issues = check_run(db, run)
-        if issues:
-            raise HTTPException(409, 'Publication validation failed. Validate the draft to review conflicts.')
-        previous = db.query(m.Run).filter_by(term_id=run.term_id, dept_code=run.dept_code, status='PUBLISHED').all()
-        for old in previous:
-            old.status = 'ARCHIVED'
-            audit(db, user, 'timetable.archived', run=old, detail={'replaced_by': run.id})
-        db.flush()  # Archive before assigning the partial unique-index key.
-        run.status, run.published_by, run.published_at = 'PUBLISHED', user.id, m.now()
-        run.validated_by, run.validated_at = user.id, m.now()
-        audit(db, user, 'timetable.published', run=run)
-        term_row = term(db, run.term_id)
-        common = dict(
-            title='Timetable published',
-            message=f'{term_row.name} timetable version {run.id} is now published for {run.dept_code}.',
-            notification_type='TIMETABLE_PUBLISHED', source_agent='timetable_service',
-            event_key=f'timetable_published:{run.id}',
-            related_entity_type='timetable_run', related_entity_id=run.id)
-        notify_role(db, 'student', dept=run.dept_code, route='/student/timetable', **common)
-        notify_role(db, 'faculty', dept=run.dept_code, route='/faculty/timetable', **common)
+        run = stage_publish(db, user, run_id)
     return describe_run(db, run)

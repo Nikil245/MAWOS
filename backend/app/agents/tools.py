@@ -173,6 +173,12 @@ def assistant_capabilities(role: str, display_name: str | None = None) -> dict:
         record_prompts.extend(["Show my timetable", "Show my notifications", "Show visible campus events"])
     elif role in {"principal", "admin", "librarian"}:
         record_prompts.extend(["Show my notifications", "Show visible campus events"])
+    if role == "faculty":
+        record_prompts.append("Request a replacement slot for my class")
+    elif role == "hod":
+        record_prompts.extend(["Generate a timetable draft", "Review timetable conflicts"])
+    elif role in {"principal", "admin"}:
+        record_prompts.extend(["Review timetable operation previews", "Publish a reviewed timetable draft"])
     mawos_prompts = ["What is a CIE?", "What is MAWOS?"]
     help_prompts = ["What can you help me with?", "Who are you?"]
     greeting_name = (display_name or "").strip()

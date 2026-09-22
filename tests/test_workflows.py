@@ -10,14 +10,16 @@ from backend.app.models import (
 
 
 def test_timetable_generation_is_conflict_free(agents, db):
+    before = db.query(TimetableSlot).count()
     result = agents["timetable_agent"].generate(db, "AIML")
-    assert result["ok"] and result["unplaced"] == 0
-    slots = db.query(TimetableSlot).all()
+    assert result["ok"] and result["proposal_only"] and result["unplaced"] == 0
+    slots = result["proposed_slots"]
+    assert db.query(TimetableSlot).count() == before
     # subject slot counts match credits (4 + 3)
-    per_subject = Counter(s.subject_code for s in slots)
+    per_subject = Counter(s["subject_code"] for s in slots)
     assert per_subject["23AI51"] == 4 and per_subject["23AI52"] == 3
     # no faculty double-booking
-    bookings = Counter((s.faculty_id, s.day, s.period) for s in slots)
+    bookings = Counter((s["faculty_id"], s["day"], s["period"]) for s in slots)
     assert max(bookings.values()) == 1
     # CSV export renders
     csv = agents["timetable_agent"].csv_export(db, "AIML", 3, "A")

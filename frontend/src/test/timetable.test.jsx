@@ -18,7 +18,7 @@ const run = {
   entries: [{ id: 101, requirement_id: 1, occurrence: 0, section_id: 1, subject: 'CS51', faculty_id: 1, room_id: 1, day: 0, period_index: 0, locked: false }],
   configuration: { data: { periods: [{ day: 0, index: 0, start: 540, end: 600 }] }, metadata: { sections: { 1: { year: 3, semester: 5, name: 'A' } }, faculty: { 1: 'Professor Rao' }, rooms: { 1: 'Room 101' }, subjects: { CS51: 'Algorithms' } } },
 };
-let generated, published, initialHistory;
+let generated, published, confirmed, initialHistory;
 function responder(path, options = {}) {
   if (path === '/timetable/terms') return Promise.resolve(terms);
   if (path.includes('/configuration') && path.startsWith('/hod')) return Promise.resolve(config);
@@ -31,7 +31,9 @@ function responder(path, options = {}) {
     faculty_assignments: [{ id: 1 }], requirements: [{ state: 'would_create' }],
     missing_weekly_period_values: [], missing_rooms: [], defaulted_values: [], conflicts: [] });
   if (path === '/hod/timetable/terms/1/runs') return generated();
-  if (path.endsWith('/publish')) return published();
+  if (path === '/timetable/operations/pending' || path === '/timetable/operations/audit') return Promise.resolve([]);
+  if (path === '/timetable/operations/preview') return published(options);
+  if (path === '/timetable/operations/confirm') return confirmed(options);
   if (path.endsWith('/lock')) return Promise.resolve({ ...run, entries: [{ ...run.entries[0], locked: options.body.locked }] });
   if (path === '/faculty/timetable' || path === '/student/timetable') return Promise.resolve(empty);
   if (path === '/admin/timetable/configuration') return Promise.resolve({ departments: [], rooms: [] });
@@ -50,7 +52,8 @@ beforeEach(() => {
   auth = { token: 'test-token', user: { role: 'hod', username: 'test' } };
   initialHistory = [];
   generated = () => Promise.resolve(run);
-  published = () => Promise.resolve({ ...run, status: 'PUBLISHED' });
+  published = () => Promise.resolve({ mode: 'preview', preview_id: 'preview-1', confirmation_token: 't'.repeat(43), correlation_id: 'correlation-1', summary: { new_run_id: 11, published_run_id: null } });
+  confirmed = () => Promise.resolve({ mode: 'confirmed', result: { status: 'PUBLISHED' } });
   mocks.request.mockImplementation(responder);
 });
 
@@ -115,6 +118,47 @@ describe('published personal timetables', () => {
     expect(screen.queryByText('Algorithms')).not.toBeInTheDocument();
   });
 
+  it('submits only a faculty replacement preview and shows its correlation', async () => {
+    const own = { id: 101, day: 0, day_name: 'Mon', period_index: 0, subject_code: 'CS51', subject_name: 'Algorithms', faculty: 'Professor Rao', room: 'Room 101', section: 'AIML 3A / semester 5', start_time: '09:00', end_time: '10:00' };
+    published = () => Promise.resolve({ mode: 'preview', preview_id: 'faculty-preview', correlation_id: 'faculty-correlation', summary: { replacement_date: '2026-09-15', period_index: 2, room: 'Room 102' } });
+    mocks.request.mockImplementation((path, options) => path === '/faculty/timetable'
+      ? Promise.resolve({ ...empty, published: true, weekly: [own] })
+      : responder(path, options));
+    render(<PersonalTimetable role="faculty" />);
+    fireEvent.change(await screen.findByLabelText('Assigned class'), { target: { value: '101' } });
+    fireEvent.change(screen.getByLabelText('Occurrence date'), { target: { value: '2026-09-07' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Find replacement' }));
+    expect(await screen.findByText('Proposed: 2026-09-15, period 3, Room 102')).toBeInTheDocument();
+    expect(screen.getByText(/faculty-preview · correlation faculty-correlation/)).toBeInTheDocument();
+    expect(mocks.request).toHaveBeenCalledWith('/timetable/operations/preview', expect.objectContaining({
+      body: { action: 'preview_replacement_slot', entry_id: 101, occurrence_date: '2026-09-07' },
+    }));
+    expect(mocks.request.mock.calls.some(([path]) => path === '/timetable/operations/confirm')).toBe(false);
+  });
+
+  it('shows authorized dated changes without replacing the published weekly version', async () => {
+    mocks.request.mockResolvedValue({ ...empty, published: true, changes: [{ id: 9, subject_code: 'CS51', occurrence_date: '2026-09-07', status: 'CANCELLED' }] });
+    render(<PersonalTimetable role="student" />);
+    expect(await screen.findByLabelText('Authorized timetable changes')).toHaveTextContent('CS51 · 2026-09-07 · CANCELLED · make-up class required');
+  });
+
+  it('shows accepted substitute coverage after timetable refresh without adding a weekly slot', async () => {
+    const coverage = { id: 'coverage-7', dated_coverage: true, coverage_status: 'ACCEPTED',
+      subject_code: '23AI72', subject_name: 'Operating Systems', faculty: 'Dr. Vikas Bhat',
+      room: 'AIML 4A', section: 'AIML 4A / semester 7', date: '2026-09-23',
+      start_time: '10:15', end_time: '11:10' };
+    mocks.request.mockImplementation((path, options) => path === '/faculty/timetable'
+      ? Promise.resolve({ ...empty, published: true, next: coverage, today: [coverage], weekly: [],
+        changes: [{ id: 7, kind: 'COVERAGE', subject_code: '23AI72', occurrence_date: '2026-09-23', substitute_class: true }] })
+      : responder(path, options));
+    render(<PersonalTimetable role="faculty" />);
+    expect(await screen.findByText('Coverage / Substitute class')).toBeInTheDocument();
+    expect(screen.getByText('2026-09-23 · 10:15–11:10')).toBeInTheDocument();
+    expect(screen.getByLabelText('Authorized timetable changes')).toHaveTextContent('Coverage / Substitute class accepted');
+    expect(screen.getByText(/10:15–11:10 · Operating Systems · AIML 4A · Coverage/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/23AI72 Operating Systems/)).not.toBeInTheDocument();
+  });
+
   it('preserves unsaved faculty availability selections during schedule refresh', async () => {
     mocks.request.mockImplementation((path, options) => path === '/faculty/timetable/terms/1/availability'
       ? Promise.resolve({ periods: [{ id: 9, day_of_week: 0, starts_at: '09:00', ends_at: '10:00', is_break: false, is_closed: false }], unavailable_period_ids: [] })
@@ -146,6 +190,18 @@ describe('published personal timetables', () => {
 });
 
 describe('HOD draft workflow', () => {
+  it('shows HOD occurrence preview controls after a published version is selected', async () => {
+    initialHistory = [{ id: 11, status: 'PUBLISHED' }];
+    mocks.request.mockImplementation((path, options) => path === '/timetable/runs/11'
+      ? Promise.resolve({ ...run, status: 'PUBLISHED' }) : responder(path, options));
+    render(<HodTimetable />);
+    fireEvent.change(await screen.findByLabelText('Academic term'), { target: { value: '1' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Version 11 · PUBLISHED' }));
+    expect(await screen.findByText('Published class changes')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Find replacement slot' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Preview cancellation' })).toBeDisabled();
+  });
+
   it('sends the controlled subject-credit selection in the dry-run request', async () => {
     await workspace();
     fireEvent.change(screen.getByLabelText('Bootstrap weekly periods'), { target: { value: '30' } });
@@ -206,8 +262,8 @@ describe('HOD draft workflow', () => {
     expect(screen.getByRole('columnheader', { name: 'Monday' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Lock CS51 Mon 09:00' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Validate draft' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Publish complete timetable' })).toBeInTheDocument();
-    expect(mocks.request.mock.calls.some(([p]) => p.endsWith('/publish'))).toBe(false);
+    expect(screen.getByRole('button', { name: 'Preview publication' })).toBeInTheDocument();
+    expect(mocks.request.mock.calls.some(([p]) => p === '/timetable/operations/preview')).toBe(false);
   });
 
   it('prevents duplicate generate and publish clicks while requests are pending', async () => {
@@ -221,15 +277,17 @@ describe('HOD draft workflow', () => {
     expect(mocks.request.mock.calls.filter(([p]) => p === '/hod/timetable/terms/1/runs')).toHaveLength(1);
     expect(generate).toBeDisabled();
     finishGeneration(run);
-    const publish = await screen.findByRole('button', { name: 'Publish complete timetable' });
+    const publish = await screen.findByRole('button', { name: 'Preview publication' });
     await waitFor(() => expect(publish).toBeEnabled());
     fireEvent.click(publish); fireEvent.click(publish);
     await waitFor(() => expect(finishPublication).toBeTypeOf('function'));
-    expect(mocks.request.mock.calls.filter(([p]) => p.endsWith('/publish'))).toHaveLength(1);
+    expect(mocks.request.mock.calls.filter(([p]) => p === '/timetable/operations/preview')).toHaveLength(1);
     expect(publish).toBeDisabled();
-    finishPublication({ ...run, status: 'PUBLISHED' });
+    finishPublication({ mode: 'preview', preview_id: 'preview-1', confirmation_token: 't'.repeat(43), correlation_id: 'correlation-1', summary: { new_run_id: 11, published_run_id: null } });
+    const confirm = await screen.findByRole('button', { name: 'Confirm publication' });
+    fireEvent.click(confirm);
     expect(await screen.findByText('Version 11 · PUBLISHED')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Publish complete timetable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Preview publication' })).toBeDisabled();
   });
 
   it('shows hard conflicts and unplaced requirements and disables partial publication', async () => {
@@ -238,7 +296,7 @@ describe('HOD draft workflow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate Draft' }));
     expect(await screen.findByText('Requires four periods.')).toBeInTheDocument();
     expect(screen.getByText(/CS51: 3 missing periods/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Publish complete timetable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Preview publication' })).toBeDisabled();
   });
 
   it('does not generate when preflight fails and displays actionable issues', async () => {
@@ -265,7 +323,7 @@ describe('HOD draft workflow', () => {
     published = () => Promise.reject(new Error('Publication validation failed.'));
     await workspace();
     fireEvent.click(screen.getByRole('button', { name: 'Generate Draft' }));
-    const publish = await screen.findByRole('button', { name: 'Publish complete timetable' });
+    const publish = await screen.findByRole('button', { name: 'Preview publication' });
     await waitFor(() => expect(publish).toBeEnabled());
     fireEvent.click(publish);
     expect(await screen.findByText('Publication validation failed.')).toBeInTheDocument();
@@ -274,19 +332,75 @@ describe('HOD draft workflow', () => {
 });
 
 describe('configuration, overview and role routes', () => {
-  it('exposes admin term and room configuration', async () => {
+  it('keeps admin configuration in a separate section', async () => {
     render(<AdminTimetable />);
-    expect(await screen.findByText('Timetable configuration')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Timetable operations' })).toBeInTheDocument();
+    expect(screen.getByText('Select timetable scope')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Academic configuration' }));
     expect(screen.getByText('No rooms configured.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save academic term' })).toBeInTheDocument();
   });
 
-  it('keeps principal coverage read-only and distinguishes drafts from publication', async () => {
-    mocks.request.mockResolvedValue([{ term_id: 1, department: 'CSE', term: 'Odd term', published_run_id: null, latest_status: 'PARTIAL', published_metrics: null }]);
+  it('shows the admin draft, conflict, occurrence preview, publish and audit workflow after scope selection', async () => {
+    mocks.request.mockImplementation((path, options) => {
+      if (path === '/principal/timetable/overview') return Promise.resolve([{ term_id: 1, department: 'AIML', term: 'Odd term', published_run_id: 11, latest_run_id: 11, latest_status: 'COMPLETE', published_metrics: { placed: 1, required: 1 } }]);
+      if (path === '/timetable/runs/11') return Promise.resolve({ ...run, status: 'PUBLISHED' });
+      return responder(path, options);
+    });
+    render(<AdminTimetable />);
+    fireEvent.change(await screen.findByLabelText('Academic term'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Timetable department'), { target: { value: 'AIML' } });
+    expect(await screen.findByRole('button', { name: 'Preview draft generation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View conflict report' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview publication' })).toBeInTheDocument();
+    expect(screen.getByText('Published class changes')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Find replacement slot' })).toBeDisabled();
+    expect(screen.getByText('Audit history')).toBeInTheDocument();
+  });
+
+  it('refreshes Admin scope from published v9 to a confirmed draft and enables publication only after validation', async () => {
+    let overview = [{ term_id: 1, department: 'AIML', term: 'Odd term', published_run_id: 9, latest_run_id: 9, latest_status: 'PUBLISHED', published_metrics: { placed: 1, required: 1 } }];
+    let previewAction = null;
+    const v9 = { ...run, id: 9, status: 'PUBLISHED' };
+    const v10 = { ...run, id: 10, status: 'DRAFT' };
+    mocks.request.mockImplementation((path, options = {}) => {
+      if (path === '/principal/timetable/overview') return Promise.resolve(overview);
+      if (path === '/timetable/runs/9') return Promise.resolve(v9);
+      if (path === '/timetable/runs/10') return Promise.resolve(v10);
+      if (path === '/timetable/operations/preview') {
+        previewAction = options.body.action;
+        return Promise.resolve({ mode: 'preview', action: previewAction, preview_id: 'preview-10', confirmation_token: 't'.repeat(43), correlation_id: 'draft-correlation', summary: { message: 'Reviewed operation preview.' } });
+      }
+      if (path === '/timetable/operations/confirm') {
+        if (previewAction === 'generate_timetable_draft') overview = [{ ...overview[0], latest_run_id: 10, latest_status: 'DRAFT' }];
+        if (previewAction === 'validate_timetable_draft') overview = [{ ...overview[0], latest_status: 'COMPLETE' }];
+        return Promise.resolve({ mode: 'confirmed', result: { draft_run_id: 10, status: overview[0].latest_status } });
+      }
+      return responder(path, options);
+    });
+    render(<AdminTimetable />);
+    fireEvent.change(await screen.findByLabelText('Academic term'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Timetable department'), { target: { value: 'AIML' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview draft generation' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm operation' }));
+    expect(await screen.findByText(/Version 10 · DRAFT/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview publication' })).toBeDisabled();
+    const validate = screen.getByRole('button', { name: 'Preview validation' });
+    expect(validate).toBeEnabled();
+    fireEvent.click(validate);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm operation' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview publication' })).toBeEnabled());
+  });
+
+  it('shows institution operations while distinguishing drafts from publication', async () => {
+    mocks.request.mockImplementation((path) => path === '/principal/timetable/overview'
+      ? Promise.resolve([{ term_id: 1, department: 'CSE', term: 'Odd term', published_run_id: null, latest_run_id: 9, latest_status: 'PARTIAL', published_metrics: null }])
+      : Promise.resolve([]));
     render(<PrincipalTimetable />);
     expect(await screen.findByText('No published timetable')).toBeInTheDocument();
-    expect(screen.getByText('Latest run: PARTIAL')).toBeInTheDocument();
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByText('Latest run: version 9 · PARTIAL')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview draft generation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview publication' })).toBeDisabled();
   });
 
   it('redirects a student before mounting the HOD route', async () => {

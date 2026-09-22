@@ -40,6 +40,7 @@ MAWOS_DATABASE_MODE=external
 MAWOS_DATABASE_URL=postgresql+psycopg://mawos_app:YOUR_PASSWORD@127.0.0.1:5432/mawos
 # Docker backend container only:
 MAWOS_DOCKER_DATABASE_URL=postgresql+psycopg://mawos_app:YOUR_PASSWORD@host.docker.internal:5432/mawos
+MAWOS_RUN_MIGRATIONS=false
 MAWOS_SEED_DEMO_DATA=false
 ```
 
@@ -59,15 +60,20 @@ docker compose ps
 docker compose logs -f backend frontend
 ```
 
-No migration is run by these commands. The backend startup diagnostic reports
+No migration is run by these commands. Compose explicitly supplies
+`MAWOS_ENV=development` and disables automatic migration so the restricted
+runtime role needs no DDL ownership. The backend startup diagnostic reports
 the safe target fields—host, configured database, `current_database()`, and
 the Alembic revision—but never a username, password, or URL.
 
-Run native Alembic with the loopback URL from the same `.env`:
+Run native Alembic with a separate loopback migration-owner URL:
 
 ```bash
 set -a; source .env; set +a
-.venv/bin/alembic current
+MAWOS_MIGRATION_DATABASE_URL='postgresql+psycopg://MIGRATION_OWNER:PASSWORD@127.0.0.1:5432/mawos' \
+  .venv/bin/alembic current
+MAWOS_MIGRATION_DATABASE_URL='postgresql+psycopg://MIGRATION_OWNER:PASSWORD@127.0.0.1:5432/mawos' \
+  .venv/bin/alembic upgrade head
 ```
 
 ## Fresh isolated Docker PostgreSQL (`docker`)
@@ -101,7 +107,8 @@ explicitly with the migration-owner command below; this creates schema only:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml up -d postgres
-docker compose -f docker-compose.yml -f docker-compose.docker-db.yml run --rm --no-deps backend alembic upgrade head
+MAWOS_RUN_MIGRATIONS=true MAWOS_MIGRATION_DATABASE_URL='postgresql+psycopg://MIGRATION_OWNER:PASSWORD@postgres:5432/mawos' \
+  docker compose -f docker-compose.yml -f docker-compose.docker-db.yml run --rm --no-deps backend
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml up -d backend frontend
 ```
 
@@ -130,10 +137,13 @@ Docker target and that it is empty or otherwise prepared for the backup before
 running it. It must never be pointed at the real host database.
 
 After a backup, target verification, and change approval, migrations are an
-explicit operator action only:
+explicit operator action only. Prefer native Alembic with the owner URL; do
+not run it through the restricted backend runtime container:
 
 ```bash
-docker compose exec backend alembic upgrade head
+set -a; source .env; set +a
+MAWOS_MIGRATION_DATABASE_URL='postgresql+psycopg://MIGRATION_OWNER:PASSWORD@127.0.0.1:5432/mawos' \
+  .venv/bin/alembic upgrade head
 ```
 
 For an existing MAWOS database whose documented baseline is already present,
@@ -152,6 +162,7 @@ mapping. For separate Render services, configure:
 MAWOS_ENV=production
 MAWOS_DATABASE_MODE=external
 MAWOS_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:5432/mawos
+MAWOS_MIGRATION_DATABASE_URL=postgresql+psycopg://MIGRATION_OWNER:PASSWORD@HOST:5432/mawos
 MAWOS_JWT_SECRET=RANDOM_32_BYTE_OR_LONGER_SECRET
 MAWOS_CORS_ORIGINS=https://YOUR-FRONTEND.onrender.com
 MAWOS_AI_PROVIDER=disabled
@@ -160,8 +171,10 @@ MAWOS_AI_PROVIDER=disabled
 VITE_API_BASE_URL=https://YOUR-BACKEND.onrender.com/api
 ```
 
-Run `alembic upgrade head` once with a migration-owner account against the
-intended empty or existing database before starting the restricted API runtime.
+Production `auto` startup migration support uses the migration-owner URL and
+removes it before Uvicorn starts. Set `MAWOS_RUN_MIGRATIONS=false` if migration
+execution is a separately authorized deployment step; the runtime database URL
+remains the restricted application account.
 
 ## Hosted and local AI providers
 

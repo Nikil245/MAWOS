@@ -47,6 +47,17 @@ def test_external_compose_uses_docker_url_inside_backend_only():
     assert "postgres:" not in result.stdout
 
 
+def test_compose_explicitly_sets_safe_development_startup_and_hides_owner_url():
+    environment = _external_environment()
+    environment.pop("MAWOS_ENV", None)
+    rendered = _compose(environment, "--format", "json")
+    assert rendered.returncode == 0, rendered.stderr
+    backend_environment = json.loads(rendered.stdout)["services"]["backend"]["environment"]
+    assert backend_environment["MAWOS_ENV"] == "development"
+    assert backend_environment["MAWOS_RUN_MIGRATIONS"] == "false"
+    assert "MAWOS_MIGRATION_DATABASE_URL" not in backend_environment
+
+
 def test_external_compose_fails_clearly_without_docker_url():
     env = _external_environment()
     env.pop("MAWOS_DOCKER_DATABASE_URL")
@@ -120,7 +131,56 @@ def test_runtime_ports_keep_local_defaults_and_allow_render_overrides():
     entrypoint = (ROOT / "backend/docker-entrypoint.sh").read_text()
     assert entrypoint.startswith("#!/bin/sh\nset -eu\n")
     assert "alembic upgrade head" in entrypoint
+    assert "MAWOS_MIGRATION_DATABASE_URL is required" in entrypoint
+    assert "unset MAWOS_MIGRATION_DATABASE_URL" in entrypoint
     assert 'exec uvicorn backend.app.main:app --host 0.0.0.0 --port "${PORT:-8000}"' in entrypoint
     assert 'CMD ["/app/backend/docker-entrypoint.sh"]' in (ROOT / "backend/Dockerfile").read_text()
     assert 'ENV PORT=8080' in (ROOT / "frontend/Dockerfile").read_text()
     assert '${PORT}' in (ROOT / "frontend/nginx.conf").read_text()
+
+
+def _entrypoint_command(tmp_path, *, environment):
+    log = tmp_path / "startup.log"
+    for command in ("alembic", "uvicorn"):
+        script = tmp_path / command
+        script.write_text(
+            "#!/bin/sh\n"
+            f"printf '{command} runtime=%s migration=%s\\n' \"${{MAWOS_DATABASE_URL:-}}\" "
+            "\"${MAWOS_MIGRATION_DATABASE_URL:-absent}\" >> \"$STARTUP_LOG\"\n")
+        script.chmod(0o755)
+    result = subprocess.run(
+        [str(ROOT / "backend/docker-entrypoint.sh")], cwd=ROOT,
+        env={"PATH": f"{tmp_path}:{os.defpath}", "STARTUP_LOG": str(log), **environment},
+        text=True, capture_output=True, check=False,
+    )
+    return result, log.read_text() if log.exists() else ""
+
+
+def test_entrypoint_skips_development_migrations_for_restricted_runtime_role(tmp_path):
+    result, log = _entrypoint_command(tmp_path, environment={
+        "MAWOS_ENV": "development", "MAWOS_RUN_MIGRATIONS": "auto",
+        "MAWOS_DATABASE_URL": "runtime-role-url",
+    })
+    assert result.returncode == 0, result.stderr
+    assert log == "uvicorn runtime=runtime-role-url migration=absent\n"
+
+
+def test_entrypoint_uses_owner_url_only_for_production_migration(tmp_path):
+    result, log = _entrypoint_command(tmp_path, environment={
+        "MAWOS_ENV": "production", "MAWOS_RUN_MIGRATIONS": "auto",
+        "MAWOS_DATABASE_URL": "runtime-role-url",
+        "MAWOS_MIGRATION_DATABASE_URL": "migration-owner-url",
+    })
+    assert result.returncode == 0, result.stderr
+    assert log == ("alembic runtime=runtime-role-url migration=migration-owner-url\n"
+                   "uvicorn runtime=runtime-role-url migration=absent\n")
+
+
+def test_entrypoint_refuses_enabled_migrations_without_owner_url(tmp_path):
+    result, log = _entrypoint_command(tmp_path, environment={
+        "MAWOS_ENV": "production", "MAWOS_RUN_MIGRATIONS": "auto",
+        "MAWOS_DATABASE_URL": "runtime-role-url",
+    })
+    assert result.returncode == 64
+    assert "MAWOS_MIGRATION_DATABASE_URL is required" in result.stderr
+    assert log == ""

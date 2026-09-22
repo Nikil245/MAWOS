@@ -148,7 +148,13 @@ Current project documentation provides Linux/macOS shell commands; no separate W
 
 ## Docker
 
-Copy/configure `.env` first. The backend image runs `alembic upgrade head` before FastAPI starts, so its database credentials must be allowed to apply reviewed migrations. Do not point it at an unknown/live database without reviewing the migration plan. Do not use `docker compose down -v` unless intentionally deleting local Docker volumes.
+Copy/configure `.env` first. Compose explicitly supplies
+`MAWOS_ENV=development` and disables startup migrations, so the restricted
+runtime account never needs DDL ownership. Apply reviewed migrations separately
+with `MAWOS_MIGRATION_DATABASE_URL`, using a database-owner account. Do not
+point either URL at an unknown/live database without reviewing the migration
+plan. Do not use `docker compose down -v` unless intentionally deleting local
+Docker volumes.
 
 ### A. Existing external local PostgreSQL
 
@@ -193,7 +199,7 @@ deterministic record and catalogue searches do not consume it.
 
 ### B. Fresh Docker PostgreSQL
 
-This is an isolated database, not a host-database copy. Set `MAWOS_DATABASE_MODE=docker`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` in `.env`; retain `MAWOS_DOCKER_DATABASE_URL` because the base Compose file requires it. A new empty PostgreSQL database is supported: the backend entrypoint applies the reviewed migration chain before FastAPI starts.
+This is an isolated database, not a host-database copy. Set `MAWOS_DATABASE_MODE=docker`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` in `.env`; retain `MAWOS_DOCKER_DATABASE_URL` because the base Compose file requires it. Apply the reviewed migration chain explicitly before starting the restricted API runtime.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml config --quiet
@@ -203,7 +209,7 @@ docker compose -f docker-compose.yml -f docker-compose.docker-db.yml up -d backe
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml ps
 ```
 
-The persistent volume starts empty. The backend entrypoint runs `alembic upgrade head`, which creates the reviewed MAWOS schema but never creates demo data. Existing legacy databases already stamped at the former baseline remain compatible: Alembic does not rerun the new initial revision for a database at that revision or later. Docker-mode database URLs are private to its network.
+The persistent volume starts empty. Existing legacy databases already stamped at the former baseline remain compatible: Alembic does not rerun the new initial revision for a database at that revision or later. Docker-mode database URLs are private to its network.
 
 Docker URLs: <http://localhost:3000>, <http://localhost:8000/>, and <http://localhost:8000/docs>.
 
@@ -213,9 +219,10 @@ Before a live migration, back up and verify the target database. Run Alembic as 
 
 ```bash
 set -a; source .env; set +a
-.venv/bin/alembic current
-.venv/bin/alembic upgrade head
-.venv/bin/alembic current
+MAWOS_MIGRATION_DATABASE_URL='postgresql+psycopg://MIGRATION_OWNER:PASSWORD@127.0.0.1:5432/mawos' \
+  .venv/bin/alembic current
+MAWOS_MIGRATION_DATABASE_URL='postgresql+psycopg://MIGRATION_OWNER:PASSWORD@127.0.0.1:5432/mawos' \
+  .venv/bin/alembic upgrade head
 ```
 
 Use `head`, not an old hardcoded revision. The runtime role should not need DDL privileges. No reset or seed occurs automatically. For a known existing schema, review the baseline procedure before deliberately using `alembic stamp head`; stamping records a revision without applying DDL.
@@ -229,16 +236,19 @@ injected `PORT`; the images bind it automatically. Set backend variables:
 MAWOS_ENV=production
 MAWOS_DATABASE_MODE=external
 MAWOS_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:5432/mawos
+MAWOS_MIGRATION_DATABASE_URL=postgresql+psycopg://MIGRATION_OWNER:PASSWORD@HOST:5432/mawos
 MAWOS_JWT_SECRET=GENERATE_A_RANDOM_SECRET_OF_AT_LEAST_32_BYTES
 MAWOS_CORS_ORIGINS=https://YOUR-FRONTEND.onrender.com
 MAWOS_AI_PROVIDER=disabled
 ```
 
 Set the frontend build variable `VITE_API_BASE_URL=https://YOUR-BACKEND.onrender.com/api`.
-Leave Render's **Docker Command** field blank. The image entrypoint runs
-`alembic upgrade head` and then starts Uvicorn using Render's injected `PORT`.
-The configured database credentials must have permission to apply the reviewed
-migrations; Render must use the same restricted network path as the backend.
+Leave Render's **Docker Command** field blank. In production, the image
+entrypoint's `MAWOS_RUN_MIGRATIONS=auto` mode runs `alembic upgrade head` with
+the migration-owner URL, removes that URL, then starts Uvicorn using the
+restricted runtime URL and Render's injected `PORT`. Set
+`MAWOS_RUN_MIGRATIONS=false` only when migrations are an explicitly authorized
+separate deployment step.
 
 ## Testing and quality checks
 

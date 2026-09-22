@@ -2,7 +2,7 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, make_url, pool
 
 from backend.app import config as app_config
 from backend.app.database import Base
@@ -18,9 +18,10 @@ target_metadata = Base.metadata
 
 def _database_url() -> str:
     app_config.validate_database_configuration()
-    if app_config.database_backend() != "postgresql":
-        raise RuntimeError("Alembic requires MAWOS_DATABASE_URL to use PostgreSQL")
-    return app_config.DATABASE_URL
+    url = app_config.migration_database_url()
+    if make_url(url).get_backend_name() != "postgresql":
+        raise RuntimeError("Alembic requires a PostgreSQL migration URL")
+    return url
 
 
 def run_migrations_offline() -> None:

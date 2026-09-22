@@ -46,13 +46,18 @@ SOLVER_ITERS = 120_000
 
 class TimetableAgent(BaseAgent):
     name = "timetable_agent"
-    description = ("Conflict-free weekly timetable generation "
-                   "(global teacher constraints), CSV/print export")
+    description = ("Proposal-only legacy timetable solver. Production writes "
+                   "use the versioned timetable operations service.")
 
     def generate(self, db, dept_code: str | None = None,
                  max_restarts: int = 3, seed: int = 7,
                  iters: int = SOLVER_ITERS) -> dict:
-        """(Re)generate timetables for one department or the whole institution."""
+        """Build a legacy proposal without writing timetable rows.
+
+        This solver remains available for benchmark compatibility only.  The
+        production workflow persists drafts through ``app.timetable`` after
+        an authorized preview/confirmation cycle.
+        """
         q = db.query(TeachingAssignment)
         if dept_code:
             q = q.filter(TeachingAssignment.dept_code == dept_code)
@@ -85,17 +90,9 @@ class TimetableAgent(BaseAgent):
             return {"ok": False, "error": f"no feasible timetable: {exc}"}
         placed = sched.slots()
 
-        # replace scope atomically
-        dq = db.query(TimetableSlot)
-        if dept_code:
-            dq = dq.filter(TimetableSlot.dept_code == dept_code)
-        dq.delete()
-        db.bulk_insert_mappings(TimetableSlot, placed)
-        db.commit()
-
         total_needed = len(demands)
         return {
-            "ok": True, "scope": dept_code or "ALL",
+            "ok": True, "proposal_only": True, "scope": dept_code or "ALL",
             "sections": len(sched.sections), "slots_placed": len(placed),
             "slots_required": total_needed,
             "unplaced": total_needed - len(placed),
@@ -106,16 +103,16 @@ class TimetableAgent(BaseAgent):
             "objective_at_seed": round(info["seed_cost"], 1),
             "annealing_steps": info["iterations"],
             "solve_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "proposed_slots": placed,
         }
 
     def generate_live(self, db, dept_code: str | None = None,
                       max_restarts: int = 3, seed: int = 7,
                       iters: int = SOLVER_ITERS) -> dict:
-        """Same regeneration as `generate`, plus a replayable event trace.
+        """Same proposal as `generate`, plus a replayable event trace.
 
         Visualisation-only: uses `scheduler_live.solve_with_trace` instead
-        of `scheduler.solve`, but writes the exact same `TimetableSlot`
-        rows via the exact same replace-scope-atomically path.
+        of `scheduler.solve`.  It never persists timetable rows.
         """
         q = db.query(TeachingAssignment)
         if dept_code:
@@ -147,16 +144,9 @@ class TimetableAgent(BaseAgent):
         sched = info.pop("sched")
         placed = sched.slots()
 
-        dq = db.query(TimetableSlot)
-        if dept_code:
-            dq = dq.filter(TimetableSlot.dept_code == dept_code)
-        dq.delete()
-        db.bulk_insert_mappings(TimetableSlot, placed)
-        db.commit()
-
         total_needed = len(demands)
         return {
-            "ok": True, "scope": dept_code or "ALL",
+            "ok": True, "proposal_only": True, "scope": dept_code or "ALL",
             "sections": len(sched.sections), "slots_placed": len(placed),
             "slots_required": total_needed,
             "unplaced": total_needed - len(placed),
@@ -169,13 +159,14 @@ class TimetableAgent(BaseAgent):
             "solve_ms": info["solve_ms"],
             "seed_events": info["seed_events"],
             "anneal_trace": info["anneal_trace"],
+            "proposed_slots": placed,
         }
 
     async def generate_and_announce(self, db, dept_code: str | None,
                                     triggered_by: str) -> dict:
         result = self.generate(db, dept_code)
         if result.get("ok"):
-            await self.publish("timetable.generated", {
+            await self.publish("timetable.proposal_generated", {
                 "scope": result["scope"], "sections": result["sections"],
                 "placement_rate": result["placement_rate"],
                 "solve_ms": result["solve_ms"], "triggered_by": triggered_by})

@@ -1,10 +1,12 @@
 """Phase 4 checks after disabling study-concept tutoring in assistant chat."""
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
-from backend.app import llm
+from backend.app import ai_provider, llm
 from backend.app.agents import tools
+from backend.app.timetable.models import OperationPreview
 from test_read_only_chat import _headers
 
 
@@ -87,6 +89,23 @@ def test_disallowed_input_stops_before_general_model(question, agents, monkeypat
 
     monkeypatch.setattr(llm, "general_chat_async", forbidden)
     assert run(agents, question)["category"] == "sensitive_or_disallowed"
+
+
+def test_timetable_write_language_only_routes_to_confirmed_operations(agents, db, monkeypatch):
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("operational timetable request reached an AI provider")
+
+    monkeypatch.setattr(ai_provider, "_groq_request", forbidden)
+    monkeypatch.setattr(llm, "general_chat_async", forbidden)
+    actor = SimpleNamespace(role="hod", dept_code="AIML", usn=None,
+                            display_name="Department HOD")
+    before = db.query(OperationPreview).count()
+    result = run(agents, "Publish the timetable and replace tomorrow's class", actor=actor, db=db)
+    assert any(block["type"] == "link_action" and block["label"] == "Open Timetable Operations"
+               and block["url"] == "/hod/timetable" and not block["external"]
+               for block in result["blocks"])
+    assert "cannot change records from free text" in result["text"]
+    assert db.query(OperationPreview).count() == before
 
 
 def test_api_discards_invalid_context_but_still_answers_current_message(agents, monkeypatch):

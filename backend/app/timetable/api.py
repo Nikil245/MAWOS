@@ -511,7 +511,10 @@ def lock_entry(run_id: int, entry_id: int, body: LockBody, user: User = Depends(
 
 @router.post('/hod/timetable/runs/{run_id}/publish')
 def publish_run(run_id: int, user: User = Depends(hod), db: Session = Depends(get_session)):
-    return s.publish(db, user, run_id)
+    # Kept as a controlled compatibility boundary: publication now requires a
+    # short-lived preview capability through /timetable/operations.
+    s.get_run(db, user, run_id, write=True)
+    raise HTTPException(409, 'Create and explicitly confirm a publication preview in Timetable Operations.')
 
 
 @router.get('/principal/timetable/overview')
@@ -524,5 +527,6 @@ def overview(user: User = Depends(require_role('principal', 'admin')), db: Sessi
             results.append({'term_id': term.id, 'term': term.name, 'department': department.code,
                             'published_run_id': published.id if published else None,
                             'published_metrics': json.loads(published.metrics) if published else None,
+                            'latest_run_id': runs[0].id if runs else None,
                             'latest_status': runs[0].status if runs else 'UNCONFIGURED'})
     return results
