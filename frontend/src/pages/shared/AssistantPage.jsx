@@ -48,6 +48,8 @@ const MAX_STORED_MESSAGES = 50;
 const MAX_CONTEXT_MESSAGES = 8;
 const MAX_CONTEXT_CHARS = 4000;
 const EMPTY_CONVERSATION = { messages: [], contextTopic: null, conversationContext: [] };
+const MIN_THINKING_MS = 3000;
+const minimumThinkingDelay = () => new Promise((resolve) => window.setTimeout(resolve, MIN_THINKING_MS));
 
 function AssistantLoading() {
   return <main className="p-6"><p className="text-sm text-muted">Preparing your assistant…</p></main>;
@@ -305,6 +307,11 @@ function AssistantConversation({ token, user, accountKey }) {
   const [busy, setBusy] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [loadingText, setLoadingText] = useState('Preparing your answer…');
+  const chatScrollRef = useRef(null);
+  useEffect(() => {
+    const target = chatScrollRef.current?.lastElementChild;
+    if (typeof target?.scrollIntoView === 'function') target.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }, [messages, busy]);
   const append = (message) => setConversation((current) => ({
     messages: [
       ...current.messages.slice(-(MAX_STORED_MESSAGES - 1)),
@@ -350,9 +357,13 @@ function AssistantConversation({ token, user, accountKey }) {
       ? 'Looking up your authorized records…' : 'Preparing your answer…');
     pending.current = new AbortController();
     try {
-      const response = await api.chat(
+      const responseRequest = api.chat(
         token, text, pending.current.signal, contextTopic.current, conversationContext.current,
       );
+      // Observe early rejection now; the user still receives it after the minimum thinking state.
+      responseRequest.catch(() => {});
+      await minimumThinkingDelay();
+      const response = await responseRequest;
       if (!active.current) return;
       if (!response || typeof response.text !== 'string' || !response.mode || !response.routing) {
         throw new Error('Invalid assistant response');
@@ -433,7 +444,7 @@ function AssistantConversation({ token, user, accountKey }) {
         <div className="min-w-0 flex-1"><p className="font-semibold">{capability?.title || 'Academic assistant'}</p><p className="text-xs text-muted">{capability?.subtitle || 'Loading authorized capabilities'}</p></div>
         <button type="button" className="assistant-clear btn-secondary !px-3" disabled={busy || !messages.some((message) => message.role === 'user')} onClick={clearConversation}><Trash2 size={16} /><span className="assistant-clear-label">Clear conversation</span></button>
       </div>
-      <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4 sm:p-5" aria-live="polite">
+      <div ref={chatScrollRef} className="min-h-0 flex-1 space-y-4 overflow-auto p-4 sm:p-5" aria-live="polite">
         {capabilityState.status === 'loading' && <div aria-live="polite" className="text-sm text-muted">Loading your authorized assistant scope…</div>}
         {capabilityFailed && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700">Assistant capabilities are temporarily unavailable. You can still ask general academic or MAWOS questions.<button type="button" className="ml-2 font-semibold underline" onClick={retryCapabilities}>Retry</button></div>}
         {messages.map((message) => message.role === 'user'
@@ -443,7 +454,7 @@ function AssistantConversation({ token, user, accountKey }) {
             : message.source || message.summary
               ? <AssistantResponse message={message} role={user.role} onSuggestion={setValue} key={message.id} />
               : <div className="flex max-w-[90%] items-start gap-2" key={message.id}><span className="mt-1 shrink-0 rounded-lg bg-blue-50 p-2 text-primary"><Bot size={17} aria-hidden="true" /></span><div className="whitespace-pre-wrap rounded-2xl rounded-tl-md bg-slate-100 p-3 text-sm leading-6 text-slate-800">{message.text}</div></div>)}
-        {busy && <div className="flex w-fit items-center gap-2 rounded-xl bg-slate-100 p-3 text-sm text-muted"><span className="h-2 w-2 animate-pulse rounded-full bg-primary" aria-hidden="true" />{loadingText}</div>}
+        {busy && <div className="flex max-w-[90%] items-start gap-2" aria-label="MAWOS Assistant is thinking"><span className="mt-1 shrink-0 rounded-lg bg-blue-50 p-2 text-primary"><Bot size={17} aria-hidden="true" /></span><div className="rounded-2xl rounded-tl-md bg-slate-100 p-3 text-sm text-muted"><p className="mb-2">MAWOS Assistant is thinking…</p><span className="assistant-thinking-dots" aria-label={loadingText}><i /><i /><i /></span></div></div>}
       </div>
       <div className="space-y-3 border-t px-4 py-3">
         {currentCandidates.length > 1 && <div>

@@ -50,3 +50,12 @@
     .assistant-composer .field { min-width: 0; }
   }
 }
+@keyframes assistant-thinking-dot {
+  0%, 60%, 100% { opacity: .3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+.assistant-thinking-dots { display: inline-flex; gap: .25rem; }
+.assistant-thinking-dots i { width: .45rem; height: .45rem; border-radius: 9999px; background: currentColor; animation: assistant-thinking-dot 1s infinite ease-in-out; }
+.assistant-thinking-dots i:nth-child(2) { animation-delay: .15s; }
+.assistant-thinking-dots i:nth-child(3) { animation-delay: .3s; }
+@media (prefers-reduced-motion: reduce) { .assistant-thinking-dots i { animation: none; opacity: .75; } }

@@ -7,6 +7,7 @@ from ..timetable import reads as timetable_reads
 import logging
 import math
 import time
+import uuid
 from typing import Any, Literal
 
 import numpy as np
@@ -19,6 +20,8 @@ from sqlalchemy.orm import Session
 from .. import ai_provider, config, llm, metrics
 from ..agents import get_agents
 from ..agents import tools as assistant_tools
+from ..assistant_response import structure_response
+from .. import assistant_routing as conversational
 from ..auth import (create_token, get_authenticated_user, get_current_user,
                     hash_password, require_role, verify_password)
 from ..database import get_session
@@ -326,6 +329,7 @@ async def chat(body: ChatRequest, user: User = Depends(require_role(*CHAT_PORTAL
     topic = body.context_topic if body.context_topic in ChatTopic.__args__ else None
     if body.context_topic is not None and topic is None and context_status == "absent":
         context_status = "topic_invalid"
+    correlation_id = str(uuid.uuid4())
     try:
         result = await get_agents()["orchestrator_agent"].handle_chat(
             db, user, body.message, context_topic=topic, conversation_context=context)
@@ -346,12 +350,23 @@ async def chat(body: ChatRequest, user: User = Depends(require_role(*CHAT_PORTAL
         # boundary. Re-projecting it here duplicated fallback copy and could
         # discard specialized blocks.
         return result
+    except Exception:
+        logger.exception("assistant_request_failed correlation_id=%s role=%s", correlation_id, user.role)
+        fallback = conversational.response(
+            "conversation",
+            "I could not complete that read-only assistant request just now. No records were changed. "
+            "Please retry, or use the relevant authorized workspace for the current operational view.",
+            source="Safe fallback")
+        fallback.update(fallback=True, fallback_code="assistant_request_failed")
+        return structure_response(fallback, role=user.role,
+                                  duration_ms=(time.perf_counter() - started) * 1000)
     finally:
         logger.info(
-            "assistant_request intent=%s role=%s category=%s outcome=%s elapsed_ms=%.1f",
+            "assistant_request intent=%s role=%s category=%s outcome=%s correlation_id=%s elapsed_ms=%.1f",
             (result or {}).get("intent", "unclassified"), user.role,
             (result or {}).get("category", "error"),
             "failure" if not result or result.get("fallback") else "success",
+            correlation_id,
             (time.perf_counter() - started) * 1000,
         )
 

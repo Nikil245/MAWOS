@@ -6,8 +6,12 @@ import pytest
 
 from backend.app import ai_provider, llm
 from backend.app.agents import tools
+from backend.app.api import routes as api_routes
+from backend.app.main import app
+from backend.app.models import User
 from backend.app.timetable.models import OperationPreview
-from test_read_only_chat import _headers
+from fastapi.testclient import TestClient
+from test_read_only_chat import _ensure_chat_scope, _headers
 
 
 def run(agents, question, *, context=None, topic=None, actor=None, db=None):
@@ -143,3 +147,74 @@ def test_general_learning_suggestions_are_not_present_for_any_role():
     for role in ("student", "faculty", "hod", "principal", "admin"):
         groups = tools.assistant_capabilities(role)["suggestion_groups"]
         assert all(group["label"] != "General learning" for group in groups)
+
+
+@pytest.mark.parametrize("question, expected", [
+    ("What is the timetable conflict status?", "Timetable Operations"),
+    ("Show the pending timetable operations", "Timetable Operations"),
+    ("What is the conflict count?", "Timetable Operations"),
+    ("Which approvals are pending?", "pending approvals"),
+    ("Give me a library overview", "Library oversight"),
+    ("How do admissions work?", "Admissions administration"),
+    ("What is the admission count?", "Admissions administration"),
+    ("Where is system monitoring?", "System monitoring"),
+])
+def test_admin_operational_questions_have_scoped_deterministic_answers(
+        agents, db, monkeypatch, question, expected):
+    _ensure_chat_scope(db)
+    admin = db.query(User).filter_by(username="chat.admin").one()
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Admin operational guidance reached an AI provider")
+
+    monkeypatch.setattr(llm, "general_chat_async", forbidden)
+    result = run(agents, question, actor=admin, db=db)
+
+    assert result["category"] == "conversation"
+    assert result["source"] == "deterministic"
+    assert expected.lower() in result["text"].lower()
+    assert result["tools_used"] == []
+    if "timetable" in question:
+        assert any(block.get("url") == "/admin/timetable" for block in result["blocks"])
+
+
+def test_admin_general_question_has_a_safe_provider_unavailable_fallback(agents, db, monkeypatch):
+    _ensure_chat_scope(db)
+    admin = db.query(User).filter_by(username="chat.admin").one()
+
+    async def unavailable(*args, **kwargs):
+        return llm.OllamaResult(error_code="missing_key")
+
+    monkeypatch.setattr(llm, "general_chat_async", unavailable)
+    result = run(agents, "How should an administrator prepare for an orientation event?",
+                 actor=admin, db=db)
+
+    assert result["fallback"] is True
+    assert result["fallback_code"] == "missing_key"
+    assert "provider is temporarily unavailable" in result["text"].lower()
+
+
+def test_chat_route_returns_safe_response_when_admin_orchestration_fails(db, monkeypatch, caplog):
+    _ensure_chat_scope(db)
+    client, headers = _headers("chat.admin")
+
+    class BrokenOrchestrator:
+        async def handle_chat(self, *args, **kwargs):
+            raise RuntimeError("provider credential should never reach the browser")
+
+    monkeypatch.setattr(api_routes, "get_agents", lambda: {"orchestrator_agent": BrokenOrchestrator()})
+    with caplog.at_level("ERROR", logger="backend.app.api.routes"):
+        response = client.post("/api/chat", headers=headers, json={"message": "Hello"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["fallback"] is True
+    assert body["fallback_code"] == "assistant_request_failed"
+    assert "credential" not in body["text"].lower()
+    assert any("assistant_request_failed correlation_id=" in record.getMessage()
+               for record in caplog.records)
+
+
+def test_chat_route_rejects_unauthenticated_admin_requests():
+    response = TestClient(app).post("/api/chat", json={"message": "Show pending approvals"})
+    assert response.status_code == 401

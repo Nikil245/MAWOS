@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import AssistantPage from '../pages/shared/AssistantPage';
 import { api } from '../services/api';
@@ -25,13 +25,13 @@ const capability = {
   input_placeholder: 'Ask about your academic information…', record_capabilities: [], suggestion_groups: [],
 };
 
-async function renderAssistant() {
+async function renderAssistant({ role = 'student' } = {}) {
   localStorage.setItem('mawos_token', 'token');
   localStorage.setItem('mawos_user', JSON.stringify({
-    username: 'student.one', role: 'student', name: 'Good Student', ai_mode: 'lexicon',
+    username: `${role}.one`, role, name: role === 'admin' ? 'Admin User' : 'Good Student', ai_mode: 'lexicon',
   }));
   const view = render(<BrowserRouter><AuthProvider><AssistantPage /></AuthProvider></BrowserRouter>);
-  await screen.findByText(capability.greeting);
+  await screen.findByText(role === 'admin' ? 'Hello Admin User. Admin scope.' : capability.greeting);
   return view;
 }
 
@@ -39,6 +39,56 @@ describe('academic assistant response contract', () => {
   beforeEach(() => {
     localStorage.clear(); sessionStorage.clear(); vi.clearAllMocks();
     api.assistantCapabilities.mockResolvedValue(capability);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('keeps one thinking bubble for three seconds before replacing it with a quick reply', async () => {
+    api.chat.mockResolvedValue({ text: 'Delayed display answer.', mode: 'lexicon', routing });
+    await renderAssistant();
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText(/ask a question/i), { target: { value: 'Question' } });
+    fireEvent.click(screen.getByRole('button', { name: /send message/i }));
+    expect(screen.getByLabelText('MAWOS Assistant is thinking')).toBeInTheDocument();
+    expect(screen.queryByText('Delayed display answer.')).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2999); });
+    expect(screen.queryByText('Delayed display answer.')).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.getByText('Delayed display answer.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('MAWOS Assistant is thinking')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Delayed display answer.')).toHaveLength(1);
+  });
+
+  it('keeps thinking after three seconds until a slow reply arrives', async () => {
+    let resolve;
+    api.chat.mockImplementation(() => new Promise((done) => { resolve = done; }));
+    await renderAssistant();
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText(/ask a question/i), { target: { value: 'Slow question' } });
+    fireEvent.click(screen.getByRole('button', { name: /send message/i }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.getByLabelText('MAWOS Assistant is thinking')).toBeInTheDocument();
+    await act(async () => { resolve({ text: 'Slow answer.', mode: 'lexicon', routing }); });
+    expect(screen.getByText('Slow answer.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('MAWOS Assistant is thinking')).not.toBeInTheDocument();
+  });
+
+  it('renders a scoped Admin answer after the same minimum thinking delay', async () => {
+    const adminCapability = {
+      ...capability, role: 'admin', title: 'Admin academic assistant',
+      greeting: 'Hello Admin User. Admin scope.', input_placeholder: 'Ask about Admin workflows…',
+    };
+    api.assistantCapabilities.mockResolvedValue(adminCapability);
+    api.chat.mockResolvedValue({
+      text: 'Open Admin Timetable Operations to review current conflicts.', mode: 'lexicon', routing,
+    });
+    await renderAssistant({ role: 'admin' });
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText(/ask a question/i), { target: { value: 'What is the timetable conflict status?' } });
+    fireEvent.click(screen.getByRole('button', { name: /send message/i }));
+    expect(screen.getByLabelText('MAWOS Assistant is thinking')).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.getByText(/open admin timetable operations/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText('MAWOS Assistant is thinking')).not.toBeInTheDocument();
   });
 
   it('renders canonical deterministic text instead of raw response JSON', async () => {
@@ -119,7 +169,7 @@ describe('academic assistant response contract', () => {
 
     fireEvent.change(screen.getByLabelText(/ask a question/i), { target: { value: 'Show my marks' } });
     fireEvent.click(screen.getByRole('button', { name: /send message/i }));
-    expect(screen.getByText('Looking up your authorized records…')).toBeInTheDocument();
+    expect(screen.getByLabelText('Looking up your authorized records…')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /send message/i })).toBeDisabled();
 
     reject(new Error('internal database password'));

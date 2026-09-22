@@ -85,13 +85,16 @@ class AllowedIntentParameters(BaseModel):
     child_usn: str | None = Field(default=None, max_length=16)
     student_usn: str | None = Field(default=None, max_length=16)
     limit: int = Field(default=20, ge=1, le=50)
-    department_code: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9]{1,7}$")
+    # This is a selector, not an authority grant.  It may be a code or the
+    # department's display name and is resolved against the Department table
+    # only after the authenticated role scope is checked.
+    department_code: str | None = Field(default=None, max_length=128)
     academic_year: int | None = Field(default=None, ge=1, le=4)
     semester: int | None = Field(default=None, ge=1, le=8)
     group_by: AnalyticsGroupBy | None = None
     metric: AnalyticsMetric | None = None
 
-    @field_validator("subject", "query", "child_usn", "student_usn")
+    @field_validator("subject", "query", "child_usn", "student_usn", "department_code")
     @classmethod
     def safe_parameter(cls, value):
         if value is None:
@@ -99,6 +102,15 @@ class AllowedIntentParameters(BaseModel):
         value = value.strip()
         if not value or _SQLISH.search(value):
             raise ValueError("unsupported or unsafe parameter")
+        return value
+
+    @field_validator("department_code")
+    @classmethod
+    def safe_department_selector(cls, value):
+        if value is None:
+            return value
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9 &-]{0,127}", value):
+            raise ValueError("unsupported department selector")
         return value
 
     @field_validator("child_usn", "student_usn")
@@ -364,6 +376,30 @@ def academic_year_semesters(academic_year: int) -> tuple[int, int]:
     return academic_year * 2 - 1, academic_year * 2
 
 
+def _department_selector(message: str) -> str | None:
+    """Extract a small, untrusted department selector without guessing authority."""
+    patterns = (
+        r"\b(?:of|in|for)\s+(?!my\b|the\b)([A-Za-z][A-Za-z0-9 &-]{1,96}?)\s+department\b",
+        r"\b(?:of|in|for)\s+(?!my\b)([A-Za-z][A-Za-z0-9]{1,7})\b",
+        r"\b([A-Za-z][A-Za-z0-9]{1,7})\s+(?:student(?:\s+(?:count|strength))?|strength)\b",
+    )
+    for index, pattern in enumerate(patterns):
+        match = re.search(pattern, message, re.I)
+        if match:
+            candidate = match.group(1).strip()
+            # The compact "in AIML" form is intentionally code-only: natural
+            # phrases such as "for first year" are academic filters, not a
+            # department selector.  Display names use the explicit
+            # "of <name> department" form above.
+            if index == 1 and not candidate.isupper():
+                continue
+            return candidate
+    for candidate in re.findall(r"\b([A-Z][A-Z0-9]{1,7})\b", message):
+        if candidate not in {"HOD", "MAWOS"}:
+            return candidate
+    return None
+
+
 def _analytics_parameters(message: str, intent: AllowedIntent) -> dict:
     text = " ".join(message.casefold().replace("-", " ").split())
     params: dict = {}
@@ -400,9 +436,9 @@ def _analytics_parameters(message: str, intent: AllowedIntent) -> dict:
     params["metric"] = metric
     # Department text is an untrusted selector. It is retained only as a
     # validated value; authorization later replaces it with the HOD's scope.
-    code = re.search(r"\b([A-Z][A-Z0-9]{1,7})\b", message)
-    if code and code.group(1) not in {"HOD", "MAWOS"}:
-        params["department_code"] = code.group(1)
+    selector = _department_selector(message)
+    if selector and selector.upper() not in {"HOD", "MAWOS"}:
+        params["department_code"] = selector
     return params
 
 
@@ -421,9 +457,13 @@ def _classify_analytics(message: str) -> AllowedIntentRequest | None:
     institution = bool(re.search(
         r"\b(?:institution|institution wide|college wide|whole college)\b.{0,35}\b(?:overview|statistics|summary|analytics)\b"
         r"|\b(?:overview|statistics|summary|analytics)\b.{0,35}\b(?:institution|institution wide|college wide|whole college)\b", text))
-    if institution:
+    if re.search(r"\bdepartment[ -]?wise\b", text) and re.search(r"\b(?:students?|student count|student strength|strength)\b", text):
         intent = AllowedIntent.get_institution_overview
-    elif re.search(r"\b(?:how many|number of|count)\b.{0,30}\bstudents?\b|\bstudent count\b", text):
+    elif institution:
+        intent = AllowedIntent.get_institution_overview
+    elif (re.search(r"\b(?:how many|number of|count)\b.{0,30}\bstudents?\b|\b(?:student count|student strength)\b", text)
+          or (re.search(r"\b(?:total\s+)?(?:student\s+)?strength\b", text)
+              and re.search(r"\bdepartment\b|\b[A-Za-z]{2,8}\b", message))):
         intent = AllowedIntent.get_department_student_count
     elif re.search(r"\b(?:how many|number of|count)\b.{0,30}\b(?:faculty|teachers?)\b|\bfaculty count\b", text):
         intent = AllowedIntent.get_department_faculty_count
@@ -585,18 +625,42 @@ def _clean_timetable(db, user, student) -> dict:
     return data
 
 
-def _department_scope(user, request: AllowedIntentRequest) -> str | None:
-    """Bind department analytics to authority, never to question text."""
-    if request.intent not in _DEPARTMENT_ANALYTICS_INTENTS or user.role != "hod":
+def _resolve_department_code(db, selector: str | None) -> str | None:
+    if not selector:
         return None
+    normalized = selector.strip().casefold()
+    return db.scalar(select(Department.code).where(
+        (func.lower(Department.code) == normalized) | (func.lower(Department.name) == normalized)))
+
+
+def _department_scope(db, user, request: AllowedIntentRequest) -> tuple[str | None, str | None]:
+    """Bind an aggregate to authenticated scope; question text never grants access."""
+    if request.intent not in _DEPARTMENT_ANALYTICS_INTENTS:
+        return None, "denied"
     code = (user.dept_code or "").strip().upper()
-    requested = (request.parameters.department_code or "").strip().upper()
-    # An explicit foreign selector is denied rather than silently reinterpreted.
-    # Either behavior would prevent expansion, but denial keeps the boundary
-    # visible and preserves the established department-summary policy.
-    if requested and requested != code:
-        return None
-    return code or None
+    requested = request.parameters.department_code
+    resolved = _resolve_department_code(db, requested) if requested else None
+    if user.role == "hod":
+        if requested and resolved is None:
+            return None, "unknown"
+        if requested and resolved != code:
+            return None, "foreign"
+        return (code or None), None
+    if user.role in {"admin", "principal"}:
+        if not requested:
+            return None, "missing"
+        return (resolved, None) if resolved else (None, "unknown")
+    return None, "denied"
+
+
+def _department_scope_error(db, reason: str) -> dict:
+    if reason in {"missing", "unknown"}:
+        codes = [code for code in db.scalars(select(Department.code).order_by(Department.code)).all()]
+        return {"error": "Unknown department. Use a valid department code or name"
+                + (f": {', '.join(codes)}." if codes else ".")}
+    if reason == "foreign":
+        return {"error": "Department student strength is available only for your own authorized department."}
+    return _safe_denial()
 
 
 def _student_filters(department_code: str, params: AllowedIntentParameters):
@@ -617,8 +681,8 @@ def _department_identity(db, department_code: str) -> tuple[str, str]:
 
 
 def _student_count(db, department_code: str, params: AllowedIntentParameters) -> int:
-    return len(db.scalars(select(Student.usn).where(
-        *_student_filters(department_code, params))).all())
+    return int(db.scalar(select(func.count()).select_from(Student).where(
+        *_student_filters(department_code, params), Student.status == "enrolled")) or 0)
 
 
 def _attendance_analytics(db, department_code: str,
@@ -1336,9 +1400,9 @@ def execute(db, agents, user, request: AllowedIntentRequest) -> dict:
     if user.role not in {"student", "faculty", "hod", "principal", "admin", "parent", "librarian"}:
         return _safe_denial()
     if request.intent in _DEPARTMENT_ANALYTICS_INTENTS:
-        department_code = _department_scope(user, request)
+        department_code, scope_error = _department_scope(db, user, request)
         if department_code is None:
-            return _safe_denial()
+            return _department_scope_error(db, scope_error or "denied")
         return _department_analytics(db, department_code, request.intent, params)
     if request.intent == AllowedIntent.get_institution_overview:
         if user.role not in {"admin", "principal"}:
@@ -1471,7 +1535,7 @@ def format_result(intent: AllowedIntent, result: dict) -> str:
                  f"{('first', 'second', 'third', 'fourth')[year - 1]}-year {code}"
                  if year else code)
         if intent == AllowedIntent.get_department_student_count:
-            return f"There are {result.get('student_count', 0)} students in {scope}."
+            return f"{scope} currently has {result.get('student_count', 0)} active students."
         if intent == AllowedIntent.get_department_faculty_count:
             return f"There are {result.get('faculty_count', 0)} faculty members in {code}."
         if intent in {AllowedIntent.get_department_average_attendance,

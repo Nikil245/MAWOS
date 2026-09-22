@@ -660,7 +660,8 @@ class OrchestratorAgent(BaseAgent):
             message, re.I)
         if timetable_command and user.role in {'faculty', 'hod', 'principal', 'admin'}:
             route = ('/faculty/timetable' if user.role == 'faculty' else
-                     '/hod/timetable' if user.role == 'hod' else '/principal/timetable')
+                     '/hod/timetable' if user.role == 'hod' else
+                     '/admin/timetable' if user.role == 'admin' else '/principal/timetable')
             result = conversational.response(
                 'conversation',
                 ('I can prepare an allowlisted timetable action, but I cannot change records from free text. '
@@ -677,13 +678,34 @@ class OrchestratorAgent(BaseAgent):
                 capability["description"] + " I cannot change records, bypass permissions, "
                 "process credentials, or provide professional or emergency advice.",
                 source="Safe fallback")
+        if user.role == "admin":
+            admin_help = (
+                (r"\b(timetable|schedule).*(status|conflict|pending)|\b(conflict|pending).*(timetable|schedule)|"
+                 r"\b(?:pending|awaiting)\s+(?:timetable\s+)?(?:operations?|previews?)\b|\bconflict count\b",
+                 "For current timetable status, conflicts, and pending reviewed previews, open Admin Timetable Operations. "
+                 "The assistant keeps this guidance read-only; confirmations remain explicit in that workspace."),
+                (r"\b(pending|awaiting).*(approval|approvals|coverage)|\b(approval|approvals|coverage).*(pending|awaiting)",
+                 "For pending approvals and coverage decisions, open the Admin approval workspace. "
+                 "This assistant can guide you to the authorized view, while every approval remains an explicit audited action."),
+                (r"\b(library|catalogue|books?)\b",
+                 "For the current library overview, open Library oversight. It provides the authorized catalogue and circulation view."),
+                (r"\b(admissions?|applicant|merit|allot|enrol)\b",
+                 "For admissions status and workflow guidance, open Admissions administration. Review applicants and use its explicit controls for any change."),
+                (r"\b(system|monitoring|health|workflow)\b",
+                 "For system guidance, open System monitoring to review the current safe operational indicators and recent workflows."),
+            )
+            for index, (pattern, answer) in enumerate(admin_help):
+                if re.search(pattern, message, re.I):
+                    result = conversational.response("conversation", answer, source="Deterministic answer")
+                    if index == 0:
+                        result["actions"] = [{"label": "Open Timetable Operations", "route": "/admin/timetable"}]
+                    return result
         # All database-related intents are selected and executed locally. The
         # provider is intentionally not consulted, even when it is healthy.
         allowlisted = read_only_db.classify_deterministic(message)
         # Aggregate analytics use the strict Groq-classifier/fixed-query path
         # below. Personal and operational reads remain fully deterministic.
         if allowlisted is not None and allowlisted.intent in {
-                read_only_db.AllowedIntent.get_department_student_count,
                 read_only_db.AllowedIntent.get_department_average_attendance,
                 read_only_db.AllowedIntent.get_department_attendance_by_semester,
                 read_only_db.AllowedIntent.get_department_attendance_risk_summary,

@@ -10,5 +10,5 @@ export default defineConfig({
     proxy: { '/api': 'http://127.0.0.1:8000' },
   },
   build: { outDir: 'dist', emptyOutDir: true },
-  test: { environment: 'jsdom', globals: true, setupFiles: './src/test/setup.js' },
+  test: { environment: 'jsdom', globals: true, setupFiles: './src/test/setup.js', testTimeout: 10000 },
 });

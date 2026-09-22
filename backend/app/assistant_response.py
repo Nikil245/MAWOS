@@ -652,8 +652,10 @@ def _safe_trace(result: dict, role: str, duration_ms: float, intent: str) -> dic
                        "Local AI used for a general-learning explanation" if source == "ollama" else
                        "AI provider bypassed for this deterministic request" if source == "deterministic" else
                        "Safe fallback used; no unverified record claim returned")
+    intent_label = ("Department Strength query" if intent == "get_department_student_count"
+                    else _plain(intent.replace("_", " ").title(), 120))
     steps = [
-        {"label": "Intent recognized", "detail": _plain(intent.replace("_", " ").title(), 120), "status": "complete"},
+        {"label": "Intent recognized", "detail": intent_label, "status": "complete"},
         {"label": "Authorization", "detail": f"Verified for the authenticated {role} scope", "status": "complete"},
     ]
     if result.get("tools_used") or result.get("data"):

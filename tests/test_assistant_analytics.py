@@ -1,6 +1,7 @@
 """Deterministic, role-scoped academic analytics assistant tests."""
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -205,6 +206,76 @@ def test_all_allowlisted_analytics_phrases_classify_locally():
     assert academic_year_semesters(2) == (3, 4)
     assert academic_year_semesters(3) == (5, 6)
     assert academic_year_semesters(4) == (7, 8)
+
+
+def test_admin_department_strength_is_a_deterministic_aggregate_with_trace_metadata(
+        agents, db, monkeypatch):
+    users = _seed(db)
+    calls = _forbid_providers(monkeypatch)
+
+    result = _ask(agents, db, users["admin"], "Can you show me the total strength of AIML department?")
+
+    assert calls == []
+    assert result["intent"] == "get_department_student_count"
+    assert result["source"] == "deterministic"
+    assert result["data"]["department_code"] == "AIML"
+    assert result["data"]["student_count"] == 2
+    assert result["text"] == "AIML currently has 2 active students."
+    assert result["safe_trace"]["steps"][0]["detail"] == "Department Strength query"
+
+
+def test_hod_department_strength_is_limited_to_their_department(agents, db, monkeypatch):
+    users = _seed(db)
+    _forbid_providers(monkeypatch)
+
+    own = _ask(agents, db, users["hod"], "How many students are in ANLY?")
+    foreign = _ask(agents, db, users["hod"], "What is the total strength of OTHR department?")
+
+    assert own["source"] == "deterministic"
+    assert own["data"]["department_code"] == "ANLY"
+    assert own["data"]["student_count"] == 3
+    assert foreign["source"] == "safe_fallback"
+    assert foreign["category"] == "sensitive_or_disallowed"
+    assert "own authorized department" in foreign["text"]
+
+
+@pytest.mark.parametrize("role", ["faculty", "student", "librarian"])
+def test_department_strength_is_denied_outside_authorized_roles(agents, db, monkeypatch, role):
+    _seed(db)
+    _forbid_providers(monkeypatch)
+    user = SimpleNamespace(role=role, dept_code="AIML", usn="4MT23AI001", display_name="Scoped user")
+
+    result = _ask(agents, db, user, "AIML student count")
+
+    assert result["source"] == "safe_fallback"
+    assert result["category"] == "unsupported"
+    assert "2 active students" not in json.dumps(result)
+
+
+def test_unknown_department_strength_returns_valid_codes_without_provider(agents, db, monkeypatch):
+    users = _seed(db)
+    _forbid_providers(monkeypatch)
+
+    result = _ask(agents, db, users["admin"], "How many students are in UNKNOWN?")
+
+    assert result["source"] == "safe_fallback"
+    assert result["category"] == "sensitive_or_disallowed"
+    assert "Unknown department" in result["text"]
+    assert "AIML" in result["text"]
+
+
+def test_normal_admin_general_question_keeps_the_existing_provider_fallback(agents, db, monkeypatch):
+    users = _seed(db)
+
+    async def unavailable(*args, **kwargs):
+        return llm.OllamaResult(error_code="missing_key")
+
+    monkeypatch.setattr(llm, "general_chat_async", unavailable)
+    result = _ask(agents, db, users["admin"], "How should administrators welcome new visitors?")
+
+    assert result["category"] == "general_ai"
+    assert result["fallback"] is True
+    assert result["fallback_code"] == "missing_key"
 
 
 def test_analytics_parameters_reject_unknown_enums_and_invalid_year_semester_pairs():
