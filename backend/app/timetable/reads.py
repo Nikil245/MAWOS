@@ -2,7 +2,7 @@
 import datetime as dt
 import json
 from zoneinfo import ZoneInfo
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from ..auth import require_role
 from ..database import get_session
@@ -83,17 +83,22 @@ def published_rows(db, *, dept=None, faculty_id=None, year=None, semester=None, 
     return results
 
 
-def accepted_coverage_entries(db, faculty_id, now):
+def accepted_coverage_entries(db, faculty_id, now, *, occurrence_date=None):
     """Dated substitute work for a faculty timetable, never recurring slots."""
     rows = (db.query(CoverageAssignment).join(
         CoverageRequest, CoverageRequest.id == CoverageAssignment.coverage_request_id).filter(
             CoverageAssignment.substitute_faculty_id == faculty_id,
             CoverageAssignment.status == 'ACCEPTED',
-            CoverageRequest.status == 'APPROVED',
-            CoverageAssignment.occurrence_date >= now.date()).order_by(
+            CoverageRequest.status == 'APPROVED').order_by(
                 CoverageAssignment.occurrence_date, CoverageAssignment.id).all())
     result = []
     for assignment in rows:
+        # The selected-date view may intentionally inspect historical classes, while
+        # current/next only considers occurrences at or after the current date.
+        if occurrence_date is not None and assignment.occurrence_date != occurrence_date:
+            continue
+        if occurrence_date is None and assignment.occurrence_date < now.date():
+            continue
         entry = db.get(m.Entry, assignment.timetable_entry_id)
         term = db.get(m.Term, entry.term_id) if entry else None
         section = db.get(m.Section, entry.section_id) if entry else None
@@ -110,6 +115,7 @@ def accepted_coverage_entries(db, faculty_id, now):
                        'day_name': DAYS[assignment.occurrence_date.weekday()], 'period_index': entry.period_index,
                        'subject_code': entry.subject_code, 'subject_name': subject.name,
                        'faculty': original.name if original else 'Original faculty',
+                       'original_faculty': original.name if original else 'Original faculty',
                        'room': room.name if room else 'Room',
                        'section': f"{entry.dept_code} {section.year}{section.name} / semester {section.semester}",
                        'start_minute': period.starts_at.hour * 60 + period.starts_at.minute,
@@ -119,13 +125,29 @@ def accepted_coverage_entries(db, faculty_id, now):
     return result
 
 
-def view(db, *, now=None, **filters):
+def dated_occurrences(entries, date, *, holidays=(), starts_on=None, ends_on=None, changes=()):
+    """Return the published entries that occur on one exact Asia/Kolkata date."""
+    if (starts_on and date < starts_on) or (ends_on and date > ends_on) or date in set(holidays):
+        return []
+    source_changes = {(item['entry_id'], item['occurrence_date']): item for item in changes}
+    candidates = [entry for entry in entries if entry['day'] == date.weekday()
+                  and (entry.get('id'), str(date)) not in source_changes]
+    candidates.extend(item['replacement'] for item in changes
+                      if item.get('replacement') and item['replacement_date'] == str(date))
+    return [occurrence(entry, date) for entry in sorted(candidates, key=lambda entry: entry['start_minute'])]
+
+
+def view(db, *, now=None, selected_date=None, **filters):
     now = now or dt.datetime.now(TZ)
     if now.tzinfo is None:
         raise ValueError('A timezone-aware now is required.')
     now = now.astimezone(TZ)
+    if selected_date is None:
+        selected_date = now.date()
+    elif isinstance(selected_date, str):
+        selected_date = dt.date.fromisoformat(selected_date)
     weekly, today, current, next_options = [], [], None, []
-    active, holiday, published, period_definitions, changes = False, False, False, [], []
+    active, holiday, published, period_definitions, changes, date_schedule = False, False, False, [], [], []
     for run, bundle, entries in published_rows(db, **filters):
         meta = bundle['metadata']
         start, end = dt.date.fromisoformat(meta['term']['starts_on']), dt.date.fromisoformat(meta['term']['ends_on'])
@@ -135,6 +157,7 @@ def view(db, *, now=None, **filters):
         entry_map = {entry['id']: entry for entry in entries}
         rows = (db.query(m.OccurrenceChange).filter(
             m.OccurrenceChange.timetable_run_id == run.id,
+            m.OccurrenceChange.invalidated_at.is_(None),
             m.OccurrenceChange.timetable_entry_id.in_(entry_map or {-1})).order_by(
                 m.OccurrenceChange.occurrence_date, m.OccurrenceChange.id).all())
         run_changes = []
@@ -142,22 +165,25 @@ def view(db, *, now=None, **filters):
             original = entry_map[change.timetable_entry_id]
             replacement = None
             if change.action == 'RESCHEDULED':
-                period = next((p for p in bundle['data']['periods']
-                               if p['day'] == change.replacement_date.weekday()
-                               and p['index'] == change.replacement_period_index), None)
+                period = db.query(m.PeriodDefinition).filter_by(
+                    term_id=run.term_id, day_of_week=change.replacement_date.weekday(),
+                    period_index=change.replacement_period_index,
+                    is_break=False, is_closed=False).one_or_none()
                 room = db.get(m.Room, change.replacement_room_id)
                 if period:
                     replacement = {**original, 'day': change.replacement_date.weekday(),
                                    'day_name': DAYS[change.replacement_date.weekday()],
                                    'period_index': change.replacement_period_index,
-                                   'start_minute': period['start'], 'end_minute': period['end'],
-                                   'start_time': f"{period['start']//60:02}:{period['start']%60:02}",
-                                   'end_time': f"{period['end']//60:02}:{period['end']%60:02}",
+                                   'start_minute': period.starts_at.hour * 60 + period.starts_at.minute,
+                                   'end_minute': period.ends_at.hour * 60 + period.ends_at.minute,
+                                   'start_time': period.starts_at.strftime('%H:%M'),
+                                   'end_time': period.ends_at.strftime('%H:%M'),
                                    'room': room.name if room else original['room']}
             item = {'id': change.id, 'entry_id': change.timetable_entry_id,
                     'occurrence_date': str(change.occurrence_date), 'status': change.action,
                     'replacement_date': str(change.replacement_date) if change.replacement_date else None,
                     'replacement_period_index': change.replacement_period_index,
+                    'day': original['day'], 'period_index': original['period_index'],
                     'subject_code': original['subject_code'], 'section': original['section'],
                     'replacement': replacement}
             run_changes.append(item)
@@ -169,11 +195,24 @@ def view(db, *, now=None, **filters):
         if start <= now.date() <= end:
             published = True
             weekly.extend(entries)
-            period_definitions = bundle['data']['periods']
+            # Live period definitions are the authority for timetable display.
+            # Unlike the solver snapshot, they retain break/closed status.
+            period_definitions = [
+                {'day': period.day_of_week, 'index': period.period_index,
+                 'start': period.starts_at.hour * 60 + period.starts_at.minute,
+                 'end': period.ends_at.hour * 60 + period.ends_at.minute,
+                 'is_break': period.is_break, 'is_closed': period.is_closed}
+                for period in db.query(m.PeriodDefinition).filter_by(term_id=run.term_id).order_by(
+                    m.PeriodDefinition.day_of_week, m.PeriodDefinition.period_index)
+            ]
             today.extend(times['today'])
             current = times['current'] or current
             holiday = now.date() in holidays
             active = True
+        # A selected date is an occurrence view, not a mutation of the weekly grid.
+        date_schedule.extend(dated_occurrences(entries, selected_date, holidays=holidays,
+                                                starts_on=start, ends_on=end,
+                                                changes=run_changes))
     coverage_entries = accepted_coverage_entries(db, filters['faculty_id'], now) if filters.get('faculty_id') else []
     for entry in coverage_entries:
         dated = occurrence(entry, dt.date.fromisoformat(entry['date']))
@@ -186,6 +225,11 @@ def view(db, *, now=None, **filters):
         changes.append({'id': entry['coverage_assignment_id'], 'kind': 'COVERAGE',
                         'subject_code': entry['subject_code'], 'occurrence_date': entry['date'],
                         'status': 'ACCEPTED', 'substitute_class': True})
+    selected_coverage = accepted_coverage_entries(
+        db, filters['faculty_id'], now, occurrence_date=selected_date
+    ) if filters.get('faculty_id') else []
+    date_schedule.extend(occurrence(entry, selected_date) for entry in selected_coverage)
+    date_schedule.sort(key=lambda entry: entry['start_minute'])
     next_class = min(next_options, key=lambda e: e['starts_at']) if next_options else None
     state = 'current_class' if current else 'holiday' if holiday else 'between_classes' if today else 'no_classes_today' if active else 'unpublished'
     messages = {'current_class': 'Class in progress.', 'holiday': 'Institution holiday today.', 'between_classes': 'No class in progress; this may be a break or free period.',
@@ -193,33 +237,42 @@ def view(db, *, now=None, **filters):
     return {'timezone': 'Asia/Kolkata', 'date': str(now.date()), 'published': published, 'state': state,
             'message': messages[state], 'weekly': weekly, 'today': today, 'current': current, 'next': next_class,
             'next_message': None if next_class else 'No remaining published classes.',
-            'period_definitions': period_definitions, 'changes': changes}
+            'period_definitions': period_definitions, 'changes': changes,
+            'selected_date': str(selected_date), 'date_schedule': date_schedule,
+            # The UI uses this limited list solely as a marker in the matching weekly
+            # cell; it is never a recurring timetable entry.
+            'selected_changes': [change for change in changes
+                                 if change['occurrence_date'] == str(selected_date)]}
 
 
-def personal(db, user, now=None):
+def personal(db, user, now=None, selected_date=None):
     if user.role == 'student':
         student = db.get(Student, user.usn) if user.usn else None
         if student is None:
             raise HTTPException(404, 'Student profile not found.')
-        return view(db, dept=student.dept_code, year=student.year, semester=student.semester, section=student.section, now=now)
+        return view(db, dept=student.dept_code, year=student.year, semester=student.semester,
+                    section=student.section, now=now, selected_date=selected_date)
     if user.role in ('faculty', 'hod'):
         faculty = db.get(Faculty, user.faculty_id) if user.faculty_id else None
         if faculty is None or faculty.dept_code != user.dept_code:
             raise HTTPException(404, 'Faculty profile not found.')
-        return view(db, faculty_id=faculty.id, now=now)
+        return view(db, faculty_id=faculty.id, now=now, selected_date=selected_date)
     raise HTTPException(403, 'A student or faculty identity is required.')
 
 
 def grid(db, dept=None, year=None, section=None, faculty_id=None, semester=None):
     if faculty_id is None and dept is None:
-        return {'days': DAYS, 'periods': [], 'cells': {}, 'published': False}
+        return {'days': DAYS, 'periods': [], 'period_indices': [], 'cells': {}, 'published': False}
     data = view(db, dept=dept, year=year, section=section, faculty_id=faculty_id, semester=semester)
     definitions = data['period_definitions']
-    count = max((p['index'] for p in definitions), default=-1)+1
-    labels = [next((f"{p['start']//60:02}:{p['start']%60:02}" for p in definitions if p['index'] == i), f'Period {i+1}') for i in range(count)]
-    return {'dept': dept, 'year': year, 'section': section, 'days': DAYS, 'periods': labels, 'published': data['published'],
+    period_indices = sorted({p['index'] for p in definitions})
+    labels = [next(f"{p['start']//60:02}:{p['start']%60:02}" for p in definitions if p['index'] == index)
+              for index in period_indices]
+    return {'dept': dept, 'year': year, 'section': section, 'days': DAYS, 'periods': labels,
+            'period_indices': period_indices, 'published': data['published'],
             'cells': {f"{e['day']}-{e['period_index']}": {'subject': e['subject_code'], 'subject_name': e['subject_name'],
-                       'faculty': e['faculty'], 'room': e['room'], 'class': e['section']} for e in data['weekly']}}
+                       'faculty': e['faculty'], 'room': e['room'], 'class': e['section'],
+                       'period_index': e['period_index']} for e in data['weekly']}}
 
 
 def authorized_grid(db, user, dept, year, section):
@@ -251,6 +304,7 @@ def student_timetable(user: User = Depends(require_role('student')), db: Session
 @router.get('/faculty/timetable/weekly')
 @router.get('/faculty/timetable/today')
 @router.get('/faculty/timetable/current-next')
-def faculty_timetable(user: User = Depends(require_role('faculty', 'hod')), db: Session = Depends(get_session)):
+def faculty_timetable(date: dt.date | None = Query(None),
+                      user: User = Depends(require_role('faculty', 'hod')), db: Session = Depends(get_session)):
     with db.no_autoflush:
-        return personal(db, user)
+        return personal(db, user, now=dt.datetime.now(TZ), selected_date=date)

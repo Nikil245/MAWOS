@@ -106,10 +106,10 @@ def occurrence(db, entry_id: int, date: dt.date) -> dict:
     term = db.get(tm.Term, entry.term_id)
     section = db.get(tm.Section, entry.section_id)
     change = db.query(tm.OccurrenceChange).filter_by(
-        timetable_entry_id=entry.id, occurrence_date=date).one_or_none()
+        timetable_entry_id=entry.id, occurrence_date=date, invalidated_at=None).one_or_none()
     replacement = db.query(tm.OccurrenceChange).filter_by(
         timetable_entry_id=entry.id, replacement_date=date,
-        action='RESCHEDULED').one_or_none()
+        action='RESCHEDULED', invalidated_at=None).one_or_none()
     if change is not None:
         fail(409, "This occurrence was cancelled or rescheduled and is no longer active.")
     effective_day = date.weekday()
@@ -734,7 +734,7 @@ def attendance_occurrences(db, user) -> list[dict]:
                .filter(tm.Run.status == "PUBLISHED", tm.Term.starts_on <= today,
                        tm.Term.ends_on >= today, tm.Entry.day_of_week == today.weekday()).all())
     moved_ids = [entry_id for entry_id, in db.query(tm.OccurrenceChange.timetable_entry_id).filter_by(
-        action="RESCHEDULED", replacement_date=today).all()]
+        action="RESCHEDULED", replacement_date=today, invalidated_at=None).all()]
     if moved_ids:
         moved = (db.query(tm.Entry).join(tm.Run, tm.Run.id == tm.Entry.run_id)
                  .filter(tm.Run.status == "PUBLISHED", tm.Entry.id.in_(moved_ids)).all())

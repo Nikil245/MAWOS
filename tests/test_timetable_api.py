@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from backend.app.auth import create_token
-from backend.app.models import Notification
+from backend.app.models import Notification, WorkflowEvent
 from backend.app.database import Base, get_session
 from backend.app.main import app
 from backend.app.timetable import api as timetable_api, models as m, operations, service as s, reads
@@ -211,6 +211,59 @@ def test_faculty_reschedule_request_requires_hod_confirmation_and_updates_safe_v
     student = request(d, 'get', '/api/student/timetable', 'student').json()
     assert student['changes'][0]['status'] == 'RESCHEDULED'
     assert d['db'].query(m.OperationEvent).filter_by(phase='CONFIRMED').count() >= 2
+
+
+def test_replacement_period_must_be_active_at_preview_and_confirmation(setup):
+    d = setup
+    run = generate(d); publish(d, run)
+    entry = run['entries'][0]
+    source = dt.date.today()
+    while source.weekday() != entry['day']:
+        source += dt.timedelta(days=1)
+
+    unavailable = request(d, 'post', '/api/timetable/operations/preview', json={
+        'action': 'preview_reschedule_class', 'entry_id': entry['id'],
+        'occurrence_date': source.isoformat(), 'replacement_date': source.isoformat(),
+        'period_index': 6, 'room_id': d['room'].id})
+    assert unavailable.status_code == 409
+    assert 'Replacement periods are unavailable' in unavailable.json()['detail']
+
+    preview = request(d, 'post', '/api/timetable/operations/preview', json={
+        'action': 'preview_replacement_slot', 'entry_id': entry['id'],
+        'occurrence_date': source.isoformat()})
+    assert preview.status_code == 200, preview.text
+    target = preview.json()['summary']
+    d['db'].query(m.PeriodDefinition).filter_by(
+        term_id=d['term'].id, day_of_week=dt.date.fromisoformat(target['replacement_date']).weekday(),
+        period_index=target['period_index']).delete()
+    d['db'].commit()
+    confirmed = request(d, 'post', '/api/timetable/operations/confirm', json={
+        'preview_id': preview.json()['preview_id'], 'confirmation_token': preview.json()['confirmation_token']})
+    assert confirmed.status_code == 409
+    assert d['db'].query(m.OccurrenceChange).count() == 0
+
+
+def test_invalidated_replacement_is_not_active_and_allows_a_new_preview(setup):
+    d = setup
+    run = generate(d); publish(d, run)
+    entry = run['entries'][0]
+    source = dt.date.today()
+    while source.weekday() != entry['day']:
+        source += dt.timedelta(days=1)
+    change = m.OccurrenceChange(
+        timetable_entry_id=entry['id'], timetable_run_id=run['id'], term_id=d['term'].id,
+        dept_code=d['dept'], occurrence_date=source, action='RESCHEDULED',
+        replacement_date=source + dt.timedelta(days=1), replacement_period_index=6,
+        replacement_room_id=d['room'].id, correlation_id='a' * 36,
+        applied_by=d['users']['hod'].id, invalidated_at=m.now(),
+        invalidation_reason='Replacement period is not an active configured teaching period.')
+    d['db'].add(change); d['db'].commit()
+
+    view = request(d, 'get', '/api/student/timetable', 'student').json()
+    assert not view['changes']
+    retry = request(d, 'post', '/api/timetable/operations/preview', json={
+        'action': 'preview_cancel_class', 'entry_id': entry['id'], 'occurrence_date': source.isoformat()})
+    assert retry.status_code == 200, retry.text
 
 
 def test_authorized_reviewer_can_discard_only_that_preview_without_timetable_changes(setup):
@@ -474,3 +527,32 @@ def test_startup_never_generates_timetable_data(setup, monkeypatch):
     with TestClient(app) as client:
         assert client.get('/').status_code == 200
     assert setup['db'].query(m.Run).count() == 0
+
+
+def test_workflow_history_is_readable_and_redacts_event_payloads(setup):
+    workflow_id = '123e4567-e89b-12d3-a456-426614174000'
+    setup['db'].add_all([
+        WorkflowEvent(workflow_id=workflow_id, topic='fees.scan', agent='finance_agent', hop=0,
+                      payload=json.dumps({'newly_flagged': 3, 'usns': ['secret-student'], 'token': 'secret-token'}), elapsed_ms=4),
+        WorkflowEvent(workflow_id=workflow_id, topic='agent.error', agent='notification_agent', hop=1,
+                      payload=json.dumps({'error': 'password=not-safe', 'private_note': 'hidden'}), elapsed_ms=12),
+    ])
+    setup['db'].commit()
+    recent = request(setup, 'get', '/api/workflows/recent', 'admin')
+    assert recent.status_code == 200
+    item = next(row for row in recent.json()['workflows'] if row['workflow_id'] == workflow_id)
+    assert item['title'] == 'Fee eligibility scan'
+    assert item['triggering_agent'] == 'finance_agent'
+    assert item['status'] == 'failed' and item['event_count'] == 2
+    detail = request(setup, 'get', f'/api/workflows/{workflow_id}', 'admin')
+    assert detail.status_code == 200
+    body = detail.json()
+    assert [event['sequence'] for event in body['events']] == [1, 2]
+    assert body['events'][1]['failure_message'] == 'An agent handler failed.'
+    assert 'secret-student' not in json.dumps(body)
+    assert 'secret-token' not in json.dumps(body)
+    assert 'not-safe' not in json.dumps(body)
+
+
+def test_workflow_history_requires_an_authenticated_portal_role(setup):
+    assert setup['client'].get('/api/workflows/recent').status_code == 401

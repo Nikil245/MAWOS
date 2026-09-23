@@ -153,7 +153,8 @@ def _published_entry(db, entry_id, date, user, *, faculty_request=False):
         raise HTTPException(409, 'Date is not an occurrence of this published class.')
     if db.query(m.Holiday.id).filter_by(term_id=entry.term_id, date=date).first():
         raise HTTPException(409, 'The occurrence falls on an institution holiday.')
-    if db.query(m.OccurrenceChange.id).filter_by(timetable_entry_id=entry.id, occurrence_date=date).first():
+    if db.query(m.OccurrenceChange.id).filter_by(
+            timetable_entry_id=entry.id, occurrence_date=date, invalidated_at=None).first():
         raise HTTPException(409, 'This occurrence already has an authorized change.')
     if db.query(AttendanceSheet.id).filter_by(timetable_entry_id=entry.id, occurrence_date=date).first():
         raise HTTPException(409, 'Attendance already exists for this occurrence.')
@@ -193,9 +194,11 @@ def _target(db, entry, term, source_date, date, period_index, room_id, block_siz
     if db.query(m.Holiday.id).filter_by(term_id=term.id, date=date).first():
         raise HTTPException(409, 'Replacement date is an institution holiday.')
     if db.query(m.OccurrenceChange.id).filter_by(
-            timetable_entry_id=entry.id, replacement_date=date,
-            action='RESCHEDULED').first():
+            timetable_entry_id=entry.id, replacement_date=date, action='RESCHEDULED',
+            invalidated_at=None).first():
         raise HTTPException(409, 'This class already has an approved replacement on that date.')
+    # A dated exception is valid only in the live academic-period configuration
+    # for its term and weekday. Never infer an index from a row position.
     periods = [db.query(m.PeriodDefinition).filter_by(
         term_id=term.id, day_of_week=date.weekday(), period_index=period_index + offset).one_or_none()
         for offset in range(block_size)]
@@ -243,6 +246,7 @@ def _target(db, entry, term, source_date, date, period_index, room_id, block_siz
         changed = (db.query(m.OccurrenceChange).join(
             m.Entry, m.Entry.id == m.OccurrenceChange.timetable_entry_id)
             .filter(m.OccurrenceChange.action == 'RESCHEDULED',
+                    m.OccurrenceChange.invalidated_at.is_(None),
                     m.OccurrenceChange.replacement_date == date,
                     m.OccurrenceChange.replacement_period_index == index,
                     ((m.Entry.section_id == entry.section_id) |

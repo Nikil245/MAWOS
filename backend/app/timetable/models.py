@@ -241,15 +241,18 @@ class OccurrenceChange(Base):
     correlation_id = Column(String(36), nullable=False)
     applied_by = Column(Integer, ForeignKey('users.id'), nullable=False)
     applied_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    invalidated_at = Column(DateTime(timezone=True))
+    invalidation_reason = Column(String(256))
     __table_args__ = (
         CheckConstraint("action IN ('RESCHEDULED','CANCELLED')", name='ck_tt_occurrence_change_action'),
         CheckConstraint("(action = 'CANCELLED' AND replacement_date IS NULL AND replacement_period_index IS NULL AND replacement_room_id IS NULL) OR (action = 'RESCHEDULED' AND replacement_date IS NOT NULL AND replacement_period_index IS NOT NULL AND replacement_room_id IS NOT NULL)", name='ck_tt_occurrence_change_target'),
-        UniqueConstraint('timetable_entry_id', 'occurrence_date', name='uq_tt_occurrence_change_source'),
         Index('ix_tt_occurrence_change_correlation', 'correlation_id'),
         Index('ix_tt_occurrence_change_target', 'replacement_date', 'replacement_period_index'),
+        Index('uq_active_tt_occurrence_change_source', 'timetable_entry_id', 'occurrence_date', unique=True,
+              postgresql_where=text('invalidated_at IS NULL'), sqlite_where=text('invalidated_at IS NULL')),
         Index('uq_tt_occurrence_change_entry_target_date', 'timetable_entry_id',
               'replacement_date', unique=True,
-              postgresql_where=text("action = 'RESCHEDULED'"),
-              sqlite_where=text("action = 'RESCHEDULED'")),
+              postgresql_where=text("action = 'RESCHEDULED' AND invalidated_at IS NULL"),
+              sqlite_where=text("action = 'RESCHEDULED' AND invalidated_at IS NULL")),
         Index('ix_tt_occurrence_change_scope_date', 'dept_code', 'occurrence_date'),
     )

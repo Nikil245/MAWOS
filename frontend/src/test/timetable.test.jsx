@@ -101,6 +101,33 @@ describe('published personal timetables', () => {
     expect(screen.getByRole('rowheader', { name: '09:00–09:55' })).toHaveClass('sticky');
   });
 
+  it('orders Time, Period, then weekdays and uses timetable period indices for teaching and break rows', async () => {
+    const monday = { id: 1, day: 0, period_index: 3, subject_code: '23AI72', subject_name: 'Operating Systems', faculty: 'Dr. Vikas Bhat', room: 'AIML Classroom 2', section: 'AIML 4A / semester 7', start_time: '12:50', end_time: '13:50' };
+    mocks.request.mockResolvedValue({ ...empty, published: true, weekly: [monday] });
+    render(<PersonalTimetable role="student" />);
+
+    await screen.findByRole('columnheader', { name: 'Monday' });
+    expect(screen.getAllByRole('columnheader').slice(0, 3).map(header => header.textContent)).toEqual(['Time', 'Period', 'Monday']);
+    const teachingRow = screen.getByRole('rowheader', { name: '12:50–13:50' }).closest('tr');
+    const breakRow = screen.getByText('Lunch break').closest('tr');
+    expect(within(teachingRow).getByText('4')).toBeInTheDocument();
+    expect(within(breakRow).getByText('—')).toBeInTheDocument();
+  });
+
+  it('renders a configured seventh period with its authoritative time range', async () => {
+    const seventh = { id: 7, day: 0, period_index: 6, subject_code: '23AI72', subject_name: 'Operating Systems', faculty: 'Dr. Vikas Bhat', room: 'AIML Classroom 2', section: 'AIML 4A / semester 7', start_time: '16:30', end_time: '17:25' };
+    const period_definitions = [
+      { day: 0, index: 0, start: 540, end: 595, is_break: false, is_closed: false },
+      { day: 0, index: 6, start: 990, end: 1045, is_break: false, is_closed: false },
+    ];
+    mocks.request.mockResolvedValue({ ...empty, published: true, weekly: [seventh], period_definitions });
+    render(<PersonalTimetable role="student" />);
+
+    const row = (await screen.findByRole('rowheader', { name: '16:30–17:25' })).closest('tr');
+    expect(within(row).getByText('7')).toBeInTheDocument();
+    expect(within(row).getByText('23AI72 · Operating Systems')).toBeInTheDocument();
+  });
+
   it.each(['student', 'faculty'])('keeps the %s timetable scoped to its role-specific endpoint', async role => {
     const own = { id: 5, day: 2, period_index: 3, subject_code: 'OWN1', subject_name: 'Authorized class', faculty: 'Assigned faculty', room: 'Room 4', section: 'AIML 4A / semester 7', start_time: '12:50', end_time: '13:50' };
     mocks.request.mockImplementation((path, options) => path === `/${role}/timetable`
@@ -152,11 +179,26 @@ describe('published personal timetables', () => {
         changes: [{ id: 7, kind: 'COVERAGE', subject_code: '23AI72', occurrence_date: '2026-09-23', substitute_class: true }] })
       : responder(path, options));
     render(<PersonalTimetable role="faculty" />);
-    expect(await screen.findByText('Coverage / Substitute class')).toBeInTheDocument();
+    expect(await screen.findAllByText('Substitute class')).toHaveLength(2);
     expect(screen.getByText('2026-09-23 · 10:15–11:10')).toBeInTheDocument();
     expect(screen.getByLabelText('Authorized timetable changes')).toHaveTextContent('Coverage / Substitute class accepted');
-    expect(screen.getByText(/10:15–11:10 · Operating Systems · AIML 4A · Coverage/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Date-specific schedule')).toHaveTextContent('Original faculty: Dr. Vikas Bhat');
     expect(screen.queryByLabelText(/23AI72 Operating Systems/)).not.toBeInTheDocument();
+  });
+
+  it('requests a selected date schedule without turning a coverage class into a weekly entry', async () => {
+    const coverage = { id: 'coverage-8', dated_coverage: true, subject_code: '23AI72', subject_name: 'Operating Systems',
+      original_faculty: 'Dr. Vikas Bhat', room: 'AIML 4A', section: 'AIML 4A / semester 7', date: '2026-09-24',
+      day: 2, period_index: 1, start_time: '10:15', end_time: '11:10' };
+    mocks.request.mockImplementation((path, options) => path === '/faculty/timetable?date=2026-09-24'
+      ? Promise.resolve({ ...empty, published: true, selected_date: '2026-09-24', date_schedule: [coverage], weekly: [] })
+      : responder(path, options));
+    render(<PersonalTimetable role="faculty" />);
+    fireEvent.change(await screen.findByLabelText('Selected date'), { target: { value: '2026-09-24' } });
+    expect(await screen.findByLabelText('Date-specific schedule')).toHaveTextContent('Substitute class');
+    expect(mocks.request).toHaveBeenCalledWith('/faculty/timetable?date=2026-09-24', expect.objectContaining({ token: 'test-token' }));
+    expect(screen.getByText('Dated change')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Wednesday 10:15–11:10: 23AI72/)).not.toBeInTheDocument();
   });
 
   it('preserves unsaved faculty availability selections during schedule refresh', async () => {

@@ -57,6 +57,38 @@ EXISTING_PORTAL_ROLES = ("student", "faculty", "hod", "principal", "admin")
 CHAT_PORTAL_ROLES = EXISTING_PORTAL_ROLES + ("parent", "librarian")
 ASSISTANT_CONTEXT_TTL_SECONDS = 12 * 60 * 60
 
+WORKFLOW_TITLES = {
+    "fees.scan": "Fee eligibility scan", "fees.updated": "Fee record update",
+    "attendance.uploaded": "Attendance upload", "attendance.updated": "Attendance update",
+    "exam.updated": "Exam eligibility update", "scholarship.updated": "Scholarship update",
+    "placement.updated": "Placement update", "notification.sent": "Notification delivery",
+    "admission.allotted": "Admission allotment", "admission.enrolled": "Student enrolment",
+    "workflow.completed": "Workflow completed", "workflow.failed": "Workflow failed",
+    "agent.error": "Agent handler failure",
+}
+
+
+def _workflow_title(topic: str) -> str:
+    return WORKFLOW_TITLES.get(topic, topic.replace("_", " ").replace(".", " · ").title())
+
+
+def _safe_workflow_summary(topic: str, payload: str) -> tuple[str, str | None]:
+    """Expose only allowlisted operational counters; never return raw payloads."""
+    if topic in {"agent.error", "workflow.failed"}:
+        return "An agent handler failed during this workflow.", "An agent handler failed."
+    try:
+        value = json.loads(payload)
+    except (TypeError, ValueError):
+        value = {}
+    if not isinstance(value, dict):
+        return _workflow_title(topic), None
+    details = []
+    for key in ("newly_flagged", "changed", "processed", "count"):
+        item = value.get(key)
+        if isinstance(item, (int, float)) and not isinstance(item, bool):
+            details.append(f"{key.replace('_', ' ')}: {item}")
+    return (_workflow_title(topic) + (f" · {', '.join(details)}" if details else ""), None)
+
 
 # ---------- auth ------------------------------------------------------------
 class LoginRequest(BaseModel):
@@ -435,7 +467,7 @@ def timetable_csv(dept: str, year: int, section: str,
     writer = csv_module.writer(stream)
     writer.writerow(['Day', *grid['periods']])
     for day, label in enumerate(grid['days']):
-        writer.writerow([label, *[grid['cells'].get(f'{day}-{period}', {}).get('subject', '') for period in range(len(grid['periods']))]])
+        writer.writerow([label, *[grid['cells'].get(f'{day}-{period}', {}).get('subject', '') for period in grid['period_indices']]])
     csv = stream.getvalue()
     return PlainTextResponse(csv, media_type="text/csv", headers={
         "Content-Disposition":
@@ -772,10 +804,21 @@ def recent_workflows(limit: int = 8, user: User = Depends(require_role(*EXISTING
               .group_by(WorkflowEvent.workflow_id)
               .order_by(func.min(WorkflowEvent.created_at).desc())
               .limit(limit).all())
-    return {"workflows": [
-        {"workflow_id": wid, "started_at": str(start),
-         "duration_ms": round(dur, 1), "events": n, "depth_hops": hops}
-        for wid, start, dur, n, hops in rows]}
+    workflows = []
+    for wid, start, dur, n, hops in rows:
+        events = (db.query(WorkflowEvent).filter_by(workflow_id=wid)
+                  .order_by(WorkflowEvent.created_at, WorkflowEvent.id).all())
+        first, last = events[0], events[-1]
+        failed = any(event.topic in {"agent.error", "workflow.failed"} for event in events)
+        terminal = last.topic in {"workflow.completed", "workflow.failed"}
+        status = "failed" if failed else "completed" if terminal else "completed"
+        workflows.append({"workflow_id": wid, "title": _workflow_title(first.topic),
+                          "triggering_agent": first.agent, "status": status,
+                          "started_at": start.isoformat() if start else None,
+                          "completed_at": last.created_at.isoformat() if last.created_at else None,
+                          "duration_ms": round(dur or 0, 1), "event_count": n,
+                          "depth_hops": hops})
+    return {"workflows": workflows}
 
 
 @router.get("/workflows/{workflow_id}")
@@ -783,11 +826,26 @@ def workflow_trace(workflow_id: str, user: User = Depends(require_role(*EXISTING
                    db: Session = Depends(get_session)):
     from ..models import WorkflowEvent
     events = (db.query(WorkflowEvent).filter_by(workflow_id=workflow_id)
-                .order_by(WorkflowEvent.elapsed_ms).all())
-    return {"workflow_id": workflow_id, "events": [
-        {"topic": e.topic, "agent": e.agent, "hop": e.hop,
-         "elapsed_ms": e.elapsed_ms, "at": str(e.created_at)}
-        for e in events]}
+                .order_by(WorkflowEvent.created_at, WorkflowEvent.id).all())
+    if not events:
+        raise HTTPException(404, "Workflow not found.")
+    trace, previous_elapsed = [], 0.0
+    for sequence, event in enumerate(events, start=1):
+        summary, failure_message = _safe_workflow_summary(event.topic, event.payload)
+        duration = max(0.0, (event.elapsed_ms or 0) - previous_elapsed)
+        previous_elapsed = max(previous_elapsed, event.elapsed_ms or 0)
+        trace.append({"sequence": sequence, "agent": event.agent,
+                      "action": _workflow_title(event.topic), "status": "failed" if event.topic in {"agent.error", "workflow.failed"} else "completed",
+                      "timestamp": event.created_at.isoformat() if event.created_at else None,
+                      "duration_ms": round(duration, 1), "elapsed_ms": event.elapsed_ms,
+                      "summary": summary, "failure_message": failure_message})
+    first, last = events[0], events[-1]
+    return {"workflow_id": workflow_id, "title": _workflow_title(first.topic),
+            "status": "failed" if any(event.topic in {"agent.error", "workflow.failed"} for event in events) else "completed",
+            "started_at": first.created_at.isoformat() if first.created_at else None,
+            "completed_at": last.created_at.isoformat() if last.created_at else None,
+            "duration_ms": round(max(event.elapsed_ms or 0 for event in events), 1),
+            "event_count": len(events), "events": trace}
 
 
 # ---------- scholarship workflow -----------------------------------------------------------

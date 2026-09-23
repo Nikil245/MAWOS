@@ -165,3 +165,43 @@ def test_empty_postgresql_database_migrates_to_head_and_matches_runtime_schema()
             connection.execute(text("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :name"), {"name": name})
             connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
         admin_engine.dispose()
+
+
+def test_postgresql_upgrade_from_timetable_operations_to_head_accepts_long_revision_id():
+    """The 20260923 revision must widen Alembic's default VARCHAR(32) first."""
+    source = _postgres_test_url()
+    source_url = make_url(source)
+    name = f"mawos_upgrade_{uuid.uuid4().hex[:20]}"
+    fresh_url = source_url.set(database=name)
+    admin_engine = create_engine(source_url, isolation_level="AUTOCOMMIT", future=True)
+    fresh_engine = None
+    from backend.app import config as app_config
+    original_url = app_config.DATABASE_URL
+    try:
+        with admin_engine.connect() as connection:
+            require_test_database_name(connection.execute(text("SELECT current_database()")).scalar_one())
+            connection.execute(text(f'CREATE DATABASE "{name}"'))
+        app_config.DATABASE_URL = fresh_url.render_as_string(hide_password=False)
+        from alembic import command
+        from alembic.config import Config
+        alembic_config = Config(str(__import__("pathlib").Path(__file__).resolve().parents[1] / "alembic.ini"))
+        command.upgrade(alembic_config, "20260921_timetable_operations")
+        command.upgrade(alembic_config, "head")
+        fresh_engine = create_engine(fresh_url, future=True)
+        with fresh_engine.connect() as connection:
+            assert connection.execute(text("SELECT version_num FROM public.alembic_version")).scalar_one() == "20260923_validate_replacement_periods"
+            size = connection.execute(text("""
+                SELECT character_maximum_length
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'alembic_version'
+                  AND column_name = 'version_num'
+            """)).scalar_one()
+            assert size >= 64
+    finally:
+        app_config.DATABASE_URL = original_url
+        if fresh_engine is not None:
+            fresh_engine.dispose()
+        with admin_engine.connect() as connection:
+            connection.execute(text("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :name"), {"name": name})
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        admin_engine.dispose()

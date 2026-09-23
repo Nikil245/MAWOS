@@ -154,6 +154,24 @@ def _approved_request(world):
     return db.query(CoverageRequest).filter_by(absence_id=absence["id"]).one()
 
 
+def _publish_coverage_snapshot(world):
+    """Supply the published read-model metadata used by the personal timetable."""
+    entry = world["entry"]
+    run = world["db"].get(tm.Run, entry.run_id)
+    run.input_snapshot = json.dumps({
+        "metadata": {
+            "term": {"starts_on": str(world["term"].starts_on), "ends_on": str(world["term"].ends_on)},
+            "holidays": [],
+            "sections": {str(entry.section_id): {"year": 3, "semester": 5, "name": "A"}},
+            "subjects": {"CVR101": "Runtime Coverage"},
+            "faculty": {str(world["faculty"]["Original"].id): "Original"},
+            "rooms": {str(entry.room_id): "CVR-101"},
+        },
+        "data": {"periods": [{"day": world["today"].weekday(), "index": 0, "start": 540, "end": 600}]},
+    })
+    world["db"].commit()
+
+
 def test_own_absence_and_role_boundaries(coverage_world):
     world = coverage_world; client = TestClient(app)
     original = world["users"]["Original"]
@@ -388,6 +406,43 @@ def test_personal_timetable_exposes_accepted_coverage_as_a_dated_entry(coverage_
     assert entries[0]["dated_coverage"] is True
     assert entries[0]["subject_code"] == "CVR101"
     assert entries[0]["coverage_status"] == "ACCEPTED"
+
+
+def test_personal_timetable_date_schedule_and_current_next_use_accepted_coverage_only(coverage_world):
+    world = coverage_world; db = world["db"]; hod = world["users"]["Department HOD"]
+    substitute = world["users"]["Eligible"]; request = _approved_request(world)
+    proposal, _ = service.approve_candidate(db, hod, request.id, substitute.faculty_id)
+    service.respond_assignment(db, substitute, proposal["assignment_id"], True)
+    _publish_coverage_snapshot(world)
+
+    before = timetable_reads.personal(db, substitute, now=dt.datetime.combine(world["today"], dt.time(8), service.TZ),
+                                      selected_date=world["today"])
+    assert [entry["id"] for entry in before["weekly"]] == []  # never a recurring assignment
+    assert [(entry["dated_coverage"], entry["subject_code"], entry["original_faculty"], entry["section"])
+            for entry in before["date_schedule"]] == [(True, "CVR101", "Original", "CVR 3A / semester 5")]
+    assert before["current"] is None
+    assert before["next"]["dated_coverage"] is True
+
+    during = timetable_reads.personal(db, substitute, now=dt.datetime.combine(world["today"], dt.time(9, 30), service.TZ),
+                                      selected_date=world["today"])
+    assert during["current"]["dated_coverage"] is True
+    later = timetable_reads.personal(db, substitute, now=dt.datetime.combine(world["today"] + dt.timedelta(days=1), dt.time(9, 30), service.TZ),
+                                     selected_date=world["today"] + dt.timedelta(days=1))
+    assert later["current"] is None
+
+
+def test_pending_or_rejected_coverage_is_not_in_substitute_date_schedule(coverage_world):
+    world = coverage_world; db = world["db"]; hod = world["users"]["Department HOD"]
+    substitute = world["users"]["Eligible"]; request = _approved_request(world)
+    proposal, _ = service.approve_candidate(db, hod, request.id, substitute.faculty_id)
+    _publish_coverage_snapshot(world)
+    proposed = timetable_reads.personal(db, substitute, now=dt.datetime.combine(world["today"], dt.time(8), service.TZ),
+                                        selected_date=world["today"])
+    assert not [entry for entry in proposed["date_schedule"] if entry.get("dated_coverage")]
+    service.respond_assignment(db, substitute, proposal["assignment_id"], False)
+    rejected = timetable_reads.personal(db, substitute, now=dt.datetime.combine(world["today"], dt.time(8), service.TZ),
+                                        selected_date=world["today"])
+    assert not [entry for entry in rejected["date_schedule"] if entry.get("dated_coverage")]
 
 
 def test_acceptance_expires_pending_occurrence_change_previews(coverage_world):

@@ -7,16 +7,33 @@ import { ErrorState, LoadingSkeleton, PageHeader } from '../../components/ui';
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const timetableRows = [
-  { index: 0, start: '09:00', end: '09:55' },
+  { period_index: 0, start: '09:00', end: '09:55' },
   { break: true, start: '09:55', end: '10:15', label: 'Morning break' },
-  { index: 1, start: '10:15', end: '11:10' },
-  { index: 2, start: '11:10', end: '12:05' },
+  { period_index: 1, start: '10:15', end: '11:10' },
+  { period_index: 2, start: '11:10', end: '12:05' },
   { break: true, start: '12:05', end: '12:50', label: 'Lunch break' },
-  { index: 3, start: '12:50', end: '13:50' },
-  { index: 4, start: '13:50', end: '14:50' },
+  { period_index: 3, start: '12:50', end: '13:50' },
+  { period_index: 4, start: '13:50', end: '14:50' },
   { break: true, start: '14:50', end: '15:15', label: 'Afternoon break' },
-  { index: 5, start: '15:15', end: '16:30' },
+  { period_index: 5, start: '15:15', end: '16:30' },
 ];
+const time = (value) => `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+const breakLabels = {
+  '09:55–10:15': 'Morning break', '12:05–12:50': 'Lunch break', '14:50–15:15': 'Afternoon break',
+};
+function configuredRows(periodDefinitions) {
+  if (!periodDefinitions?.length) return timetableRows;
+  const rows = new Map();
+  for (const period of periodDefinitions) {
+    if (period.is_closed || rows.has(period.index)) continue;
+    const start = time(period.start); const end = time(period.end);
+    rows.set(period.index, {
+      period_index: period.index, start, end,
+      break: Boolean(period.is_break || period.closed), label: breakLabels[`${start}–${end}`] || 'Break',
+    });
+  }
+  return rows.size ? [...rows.values()].sort((a, b) => a.period_index - b.period_index) : timetableRows;
+}
 const message = (e) => typeof e?.message === 'string' && e.message !== '[object Object]' ? e.message : 'Timetable request failed. Review configuration and retry.';
 function Notice({ text }) { return text ? <p role="status" className="my-3 rounded-lg border bg-white p-3 text-sm">{text}</p> : null; }
 
@@ -45,6 +62,14 @@ function indiaNow() {
   return { day: weekdays.indexOf(value('weekday')), minutes: Number(value('hour')) * 60 + Number(value('minute')) };
 }
 
+function indiaDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const value = type => parts.find(part => part.type === type)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
 function minutes(value) {
   const [hour, minute] = value.split(':').map(Number);
   return hour * 60 + minute;
@@ -66,29 +91,39 @@ function ClassCell({ entry, day, lock, busy }) {
   </article>;
 }
 
-export function Weekly({ entries = [], lock, busy = false }) {
+export function Weekly({ entries = [], periodDefinitions, lock, busy = false, selectedDate, dateEntries = [] }) {
   const now = indiaNow();
+  const rows = configuredRows(periodDefinitions);
   return <div data-testid="timetable-scroll" className="card max-w-full overflow-x-auto">
-    <table className="min-w-[1120px] w-full table-fixed border-collapse text-sm">
+    <table className="min-w-[1200px] w-full table-fixed border-collapse text-sm">
       <caption className="sr-only">Weekly timetable with time periods in rows and weekdays in columns</caption>
       <thead><tr>
         <th scope="col" className="sticky left-0 z-20 w-36 border border-slate-300 bg-slate-100 px-3 py-3 text-left font-bold text-slate-800">Time</th>
+        <th scope="col" className="w-20 border border-slate-300 bg-slate-100 px-3 py-3 text-center font-bold text-slate-800">Period</th>
         {weekdays.map((day, index) => <th scope="col" key={day} className={`border border-slate-300 px-3 py-3 text-center font-bold ${now.day === index ? 'bg-blue-100 text-blue-900' : 'bg-slate-100 text-slate-800'}`} aria-current={now.day === index ? 'date' : undefined}>{day}</th>)}
       </tr></thead>
-      <tbody>{timetableRows.map(row => {
+      <tbody>{rows.map(row => {
         if (row.break) return <tr key={`break-${row.start}`} className="bg-slate-100">
           <th scope="row" className="sticky left-0 z-10 border border-slate-300 bg-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-600">{row.start}–{row.end}</th>
+          <td className="border border-slate-300 bg-slate-200 px-3 py-2 text-center text-xs font-semibold text-slate-600">—</td>
           <td colSpan={6} className="border border-slate-300 px-4 py-2 text-center text-xs font-medium uppercase tracking-wide text-slate-500">{row.label}</td>
         </tr>;
         const isCurrentPeriod = now.minutes >= minutes(row.start) && now.minutes < minutes(row.end);
-        return <tr key={row.index}>
+        return <tr key={row.period_index}>
           <th scope="row" className={`sticky left-0 z-10 border border-slate-300 px-3 py-4 text-left align-top font-semibold ${isCurrentPeriod ? 'bg-amber-100 text-amber-900' : 'bg-white text-slate-800'}`}>{row.start}–{row.end}</th>
+          <td className={`border border-slate-300 px-3 py-4 text-center align-top font-semibold ${isCurrentPeriod ? 'bg-amber-100 text-amber-900' : 'bg-white text-slate-800'}`}>{row.period_index + 1}</td>
           {weekdays.map((day, dayIndex) => {
-            const cellEntries = entries.filter(entry => entry.day === dayIndex && entry.period_index === row.index);
+            const cellEntries = entries.filter(entry => entry.day === dayIndex && entry.period_index === row.period_index);
+            // Date entries are deliberately rendered only as a small marker. They
+            // must never become a weekly, recurring assignment.
+            const datedMarker = selectedDate && dateEntries.some(entry => (entry.date || entry.occurrence_date) === selectedDate
+              && entry.day === dayIndex && entry.period_index === row.period_index
+              && (entry.dated_coverage || entry.dated_change || entry.kind));
             const current = isCurrentPeriod && now.day === dayIndex;
             const label = cellEntries.length ? cellEntries.map(entry => `${entry.subject_code} ${entry.subject_name}, ${entry.faculty}, ${entry.room}${entry.section ? `, ${sectionDetails(entry.section)}` : ''}`).join('; ') : 'No class';
             return <td key={day} aria-label={`${day} ${row.start}–${row.end}: ${label}`} className={`min-w-[160px] border border-slate-300 p-2 align-top ${current ? 'bg-amber-50 ring-2 ring-inset ring-amber-400' : cellEntries.length ? 'bg-white' : now.day === dayIndex ? 'bg-blue-50' : 'bg-slate-50'}`}>
               {cellEntries.length ? <div className="space-y-2">{cellEntries.map(entry => <ClassCell key={entry.id ?? `${entry.requirement_id}-${entry.occurrence}`} entry={entry} day={dayIndex} lock={lock} busy={busy} />)}</div> : <span className="block py-3 text-center text-slate-400" aria-hidden="true">—</span>}
+              {datedMarker && <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-900">Dated change</span>}
             </td>;
           })}
         </tr>;
@@ -98,7 +133,11 @@ export function Weekly({ entries = [], lock, busy = false }) {
 }
 
 function ClassCard({ title, entry, empty }) {
-  return <section className="card border-l-4 border-primary p-5"><h2 className="text-sm font-semibold text-muted">{title}</h2>{entry ? <>{entry.dated_coverage && <p className="mt-2 text-sm font-semibold text-emerald-700">Coverage / Substitute class</p>}<p className="mt-2 text-xl font-bold">{entry.subject_name}</p><p>{entry.subject_code} · {entry.room}</p><p className="text-sm">{entry.faculty} · {entry.section}</p><p className="mt-2 font-semibold">{entry.date} · {entry.start_time}–{entry.end_time}</p></> : <p className="mt-2">{empty}</p>}</section>;
+  return <section className={`card border-l-4 p-5 ${entry?.dated_coverage ? 'border-amber-500 bg-amber-50' : 'border-primary'}`}><h2 className="text-sm font-semibold text-muted">{title}</h2>{entry ? <>{entry.dated_coverage && <p className="mt-2 inline-block rounded bg-amber-200 px-2 py-1 text-sm font-bold text-amber-950">Substitute class</p>}<p className="mt-2 text-xl font-bold">{entry.subject_name}</p><p>{entry.subject_code} · {entry.room}</p><p className="text-sm">{entry.dated_coverage ? `Original faculty: ${entry.original_faculty || entry.faculty}` : entry.faculty} · {entry.section}</p><p className="mt-2 font-semibold">{entry.date} · {entry.start_time}–{entry.end_time}</p></> : <p className="mt-2">{empty}</p>}</section>;
+}
+
+function DateSchedule({ date, entries = [], empty }) {
+  return <section className="card my-4 p-4" aria-label="Date-specific schedule"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="font-bold">Selected date schedule</h2><p className="mt-1 text-sm text-muted">{date} · Asia/Kolkata</p></div></div>{entries.length ? <div className="mt-3 grid gap-3 lg:grid-cols-2">{entries.map(entry => <article className={`rounded-lg border p-3 ${entry.dated_coverage ? 'border-amber-400 bg-amber-50' : 'bg-slate-50'}`} key={`${entry.id}:${entry.date}`}><div className="flex flex-wrap items-center gap-2">{entry.dated_coverage && <span className="rounded bg-amber-200 px-2 py-1 text-xs font-bold text-amber-950">Substitute class</span>}<p className="font-semibold">{entry.start_time}–{entry.end_time}</p></div><p className="mt-2 font-bold">{entry.subject_code} · {entry.subject_name}</p><p className="text-sm">Room: {entry.room}</p><p className="text-sm">{entry.dated_coverage ? `Original faculty: ${entry.original_faculty || entry.faculty}` : `Faculty: ${entry.faculty}`}</p><p className="text-sm">{sectionDetails(entry.section)}</p></article>)}</div> : <p className="mt-3 text-sm text-muted">{empty || 'No classes scheduled for this date.'}</p>}</section>;
 }
 
 function FacultyRescheduleRequest({ entries }) {
@@ -160,6 +199,7 @@ function ScopedOperations({ item, onChanged }) {
 
 export function PersonalTimetable({ role, onRefreshScheduled }) {
   const { token } = useAuth();
+  const [selectedDate, setSelectedDate] = useState(() => indiaDate());
   const [{ data, loading, error }, setState] = useState({ data: null, loading: true, error: null });
   useEffect(() => {
     let active = true;
@@ -167,7 +207,11 @@ export function PersonalTimetable({ role, onRefreshScheduled }) {
     setState({ data: null, loading: true, error: null });
     const refresh = async () => {
       try {
-        const result = await request(`/${role}/timetable`, { token, signal: controller.signal });
+        // Keep the default request backward compatible; a changed date explicitly
+        // asks the server for the exact Asia/Kolkata occurrence schedule.
+        const path = selectedDate === indiaDate() ? `/${role}/timetable`
+          : `/${role}/timetable?date=${encodeURIComponent(selectedDate)}`;
+        const result = await request(path, { token, signal: controller.signal });
         if (active) setState({ data: result, loading: false, error: null });
       } catch (error) {
         if (active) setState({ data: null, loading: false, error });
@@ -177,10 +221,12 @@ export function PersonalTimetable({ role, onRefreshScheduled }) {
     onRefreshScheduled?.(refresh);
     const timer = setInterval(refresh, 30000);
     return () => { active = false; controller.abort(); clearInterval(timer); };
-  }, [token, role, onRefreshScheduled]);
+  }, [token, role, selectedDate, onRefreshScheduled]);
   if (loading) return <LoadingSkeleton />;
   if (error) return <ErrorState error={error} />;
-  return <><PageHeader title="My timetable" eyebrow="Published academic schedule · Asia/Kolkata" />{data.changes?.length > 0 && <section className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4" aria-label="Authorized timetable changes"><h2 className="font-bold">Schedule changes</h2>{data.changes.map(change => <p className="mt-2 break-words text-sm" key={`${change.kind || 'change'}-${change.id}`}>{change.subject_code} · {change.occurrence_date} · {change.substitute_class ? 'Coverage / Substitute class accepted' : change.status}{change.replacement_date ? ` → ${change.replacement_date}, period ${change.replacement_period_index + 1}` : change.substitute_class ? '' : ' · make-up class required'}</p>)}</section>}<div className="grid gap-4 md:grid-cols-2"><ClassCard title="Current class" entry={data.current} empty={data.message} /><ClassCard title="Next class" entry={data.next} empty={data.next_message || 'No remaining published classes.'} /></div><section className="card my-4 p-4"><h2 className="font-bold">Today’s classes</h2>{data.today.length ? data.today.map(e => <p className="mt-2" key={`${e.id}:${e.date}`}>{e.start_time}–{e.end_time} · {e.subject_name} · {e.room}{e.dated_coverage ? ' · Coverage / Substitute class' : ''}</p>) : <p className="mt-2 text-muted">{data.message}</p>}</section><h2 className="mb-3 text-lg font-bold">Weekly timetable</h2>{data.published ? <Weekly entries={data.weekly} /> : <p className="card p-4">No published timetable for the current academic term.</p>}{role === 'faculty' && <><FacultyRescheduleRequest entries={data.weekly} /><Availability /></>}</>;
+  const dateEntries = data.date_schedule || data.today || [];
+  const weeklyDateMarkers = [...dateEntries, ...(data.selected_changes || [])];
+  return <><PageHeader title="My timetable" eyebrow="Published academic schedule · Asia/Kolkata" /><label className="mb-4 block max-w-xs text-sm font-semibold">Selected date<input aria-label="Selected date" className="field mt-1" type="date" value={selectedDate} onChange={event => setSelectedDate(event.target.value)} /></label>{data.changes?.length > 0 && <section className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4" aria-label="Authorized timetable changes"><h2 className="font-bold">Schedule changes</h2>{data.changes.map(change => <p className="mt-2 break-words text-sm" key={`${change.kind || 'change'}-${change.id}`}>{change.subject_code} · {change.occurrence_date} · {change.substitute_class ? 'Coverage / Substitute class accepted' : change.status}{change.replacement_date ? ` → ${change.replacement_date}, period ${change.replacement_period_index + 1}` : change.substitute_class ? '' : ' · make-up class required'}</p>)}</section>}<div className="grid gap-4 md:grid-cols-2"><ClassCard title="Current class" entry={data.current} empty={data.message} /><ClassCard title="Next class" entry={data.next} empty={data.next_message || 'No remaining published classes.'} /></div><DateSchedule date={data.selected_date || selectedDate} entries={dateEntries} empty={data.selected_date === selectedDate ? undefined : data.message} /><h2 className="mb-3 text-lg font-bold">Weekly timetable</h2>{data.published ? <Weekly entries={data.weekly} periodDefinitions={data.period_definitions} selectedDate={data.selected_date || selectedDate} dateEntries={weeklyDateMarkers} /> : <p className="card p-4">No published timetable for the current academic term.</p>}{role === 'faculty' && <><FacultyRescheduleRequest entries={data.weekly} /><Availability /></>}</>;
 }
 
 function Availability() {
@@ -348,7 +394,7 @@ function HodWorkspace({ term }) {
   const editable = run && ['COMPLETE', 'PARTIAL', 'DRAFT'].includes(run.status);
   return <><PendingOperations /><BootstrapPanel term={term} onApplied={() => { setRefresh(r => r + 1); setReady(null); }} /><DepartmentConfig term={term} refresh={refresh} disabled={busy} /><section className="card p-4"><h2 className="font-bold">Configuration readiness</h2><div className="mt-3 flex flex-wrap items-end gap-3"><button className="btn-secondary" disabled={busy} onClick={() => act(async () => setReady(await request(`/hod/timetable/terms/${term}/preflight`, { token, method: 'POST' })), 'Readiness checked.')}>Check readiness</button><label className="text-sm">Seed<input className="field w-28" aria-label="Seed" type="number" min="0" max="2147483647" value={seed} disabled={busy} onChange={e => setSeed(e.target.value)} /></label><button className="btn-primary" disabled={busy} onClick={generate}>{busy ? 'Working…' : 'Generate Draft'}</button></div>{ready && <><p className="mt-3 font-semibold">{ready.ready ? `Ready · ${ready.required_periods} required periods` : 'Configuration needs attention'}</p><ul className="list-disc pl-5">{ready.issues.map((i, n) => <li key={n}>{i.message}</li>)}</ul></>}</section><Notice text={notice} />{busy && <p role="status" className="my-3">Processing timetable action. Generation may take up to 20 seconds.</p>}
     <section className="card my-4 p-4"><h2 className="font-bold">Run history</h2>{history.loading ? <LoadingSkeleton /> : history.error ? <ErrorState error={history.error} /> : !history.data.length ? <p>No drafts or published versions yet.</p> : <div className="mt-3 flex flex-wrap gap-2">{history.data.map(r => <button key={r.id} disabled={busy} className="btn-secondary" onClick={() => act(() => loadRun(r.id), 'Version loaded.')}>Version {r.id} · {r.status}</button>)}</div>}</section>
-    {run && <><section className="card mb-4 p-4"><h2 className="text-lg font-bold">Version {run.id} · {run.status}</h2><p>{run.metrics.placed} / {run.metrics.required} periods · {run.metrics.steps} search steps · {run.metrics.search_conflicts} rejected candidates · {run.metrics.duration_ms} ms</p><h3 className="mt-3 font-bold">Hard conflicts ({run.conflicts.length})</h3>{run.conflicts.length ? <ul className="list-disc pl-5">{run.conflicts.map((i, n) => <li key={n}>{i.message}</li>)}</ul> : <p>No hard violations.</p>}<h3 className="mt-3 font-bold">Unplaced requirements</h3>{run.unplaced.length ? <ul className="list-disc pl-5">{run.unplaced.map(u => <li key={u.requirement_id}>{u.subject}: {u.missing_periods} missing periods. {u.reason}</li>)}</ul> : <p>All requirements placed.</p>}<div className="mt-4 flex flex-wrap gap-3"><button className="btn-secondary" disabled={busy || !editable} onClick={() => action('validate')}>Validate draft</button><button className="btn-primary" disabled={busy || run.status !== 'COMPLETE' || run.conflicts.length > 0 || publishPreview} onClick={previewPublish}>Preview publication</button></div>{publishPreview && <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4" role="region" aria-label="Publication confirmation"><h3 className="font-bold">Publication preview</h3><p className="mt-1 text-sm">Version {publishPreview.summary.new_run_id} will become published. {publishPreview.summary.published_run_id ? `Version ${publishPreview.summary.published_run_id} will be archived.` : 'There is no current version to archive.'}</p><p className="mt-1 break-all text-xs text-muted">Correlation ID: {publishPreview.correlation_id}</p><div className="mt-3 flex flex-wrap gap-2"><button className="btn-primary" disabled={busy} onClick={confirmPublish}>Confirm publication</button><button className="btn-secondary" disabled={busy} onClick={() => setPublishPreview(null)}>Discard preview</button></div></div>}<p className="mt-2 text-sm text-muted">Publication always requires a preview and explicit confirmation. Previous published versions remain archived in history.</p></section><OccurrenceOperations run={run} /><label className="mb-3 block text-sm font-semibold">Preview section<select className="field max-w-md" value={section} onChange={e => setSection(e.target.value)}><option value="">All sections</option>{Object.entries(run.configuration.metadata.sections).map(([id, s]) => <option key={id} value={id}>{s.year}{s.name} / semester {s.semester}</option>)}</select></label><Weekly entries={entries.filter(e => !section || String(e.section_id) === section)} busy={busy} lock={editable ? e => action(`entries/${e.id}/lock`, { locked: !e.locked }, 'PATCH') : null} /></>}
+    {run && <><section className="card mb-4 p-4"><h2 className="text-lg font-bold">Version {run.id} · {run.status}</h2><p>{run.metrics.placed} / {run.metrics.required} periods · {run.metrics.steps} search steps · {run.metrics.search_conflicts} rejected candidates · {run.metrics.duration_ms} ms</p><h3 className="mt-3 font-bold">Hard conflicts ({run.conflicts.length})</h3>{run.conflicts.length ? <ul className="list-disc pl-5">{run.conflicts.map((i, n) => <li key={n}>{i.message}</li>)}</ul> : <p>No hard violations.</p>}<h3 className="mt-3 font-bold">Unplaced requirements</h3>{run.unplaced.length ? <ul className="list-disc pl-5">{run.unplaced.map(u => <li key={u.requirement_id}>{u.subject}: {u.missing_periods} missing periods. {u.reason}</li>)}</ul> : <p>All requirements placed.</p>}<div className="mt-4 flex flex-wrap gap-3"><button className="btn-secondary" disabled={busy || !editable} onClick={() => action('validate')}>Validate draft</button><button className="btn-primary" disabled={busy || run.status !== 'COMPLETE' || run.conflicts.length > 0 || publishPreview} onClick={previewPublish}>Preview publication</button></div>{publishPreview && <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4" role="region" aria-label="Publication confirmation"><h3 className="font-bold">Publication preview</h3><p className="mt-1 text-sm">Version {publishPreview.summary.new_run_id} will become published. {publishPreview.summary.published_run_id ? `Version ${publishPreview.summary.published_run_id} will be archived.` : 'There is no current version to archive.'}</p><p className="mt-1 break-all text-xs text-muted">Correlation ID: {publishPreview.correlation_id}</p><div className="mt-3 flex flex-wrap gap-2"><button className="btn-primary" disabled={busy} onClick={confirmPublish}>Confirm publication</button><button className="btn-secondary" disabled={busy} onClick={() => setPublishPreview(null)}>Discard preview</button></div></div>}<p className="mt-2 text-sm text-muted">Publication always requires a preview and explicit confirmation. Previous published versions remain archived in history.</p></section><OccurrenceOperations run={run} /><label className="mb-3 block text-sm font-semibold">Preview section<select className="field max-w-md" value={section} onChange={e => setSection(e.target.value)}><option value="">All sections</option>{Object.entries(run.configuration.metadata.sections).map(([id, s]) => <option key={id} value={id}>{s.year}{s.name} / semester {s.semester}</option>)}</select></label><Weekly entries={entries.filter(e => !section || String(e.section_id) === section)} periodDefinitions={run.configuration.data.periods} busy={busy} lock={editable ? e => action(`entries/${e.id}/lock`, { locked: !e.locked }, 'PATCH') : null} /></>}
   </>;
 }
 
