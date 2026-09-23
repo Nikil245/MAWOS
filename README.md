@@ -1,91 +1,121 @@
-# MAWOS
+# MAWOS University ERP
 
-MAWOS is a multi-role university ERP research project built with React/Vite, FastAPI REST API, PostgreSQL as the source of truth, JWT authentication, Alembic migrations, Docker deployment options, and an in-app event/notification system. Role-based portals provide secure workflow automation for university users.
+MAWOS is a role-based University ERP for academic and operational workflows. It uses a React/Vite frontend, FastAPI REST API, PostgreSQL as the source of truth, JWT authorization, Docker, Alembic migrations, and a multi-agent backend. SQLite is also supported for isolated local development and tests.
 
-## Contents
+## What it solves
 
-- [Architecture](#architecture)
-- [Implemented modules](#implemented-modules)
-- [Roles](#roles)
-- [Workflows](#workflows)
-- [Local development](#local-development)
-- [Docker](#docker)
-- [Migrations](#migrations)
-- [Testing and quality checks](#testing-and-quality-checks)
-- [Operational notes](#operational-notes)
-- [Documentation](#documentation)
-- [Current limitations and future scope](#current-limitations-and-future-scope)
+MAWOS brings together academic administration, published timetables, faculty absence and coverage, scholarships, placement drives, library operations, admissions, in-app notifications, and role-specific dashboards. Workflows are explicit and role-gated rather than simulated client-side state.
 
-## Architecture
+## Key features by role
 
-```mermaid
+| Role | Implemented capabilities |
+|---|---|
+| Student | Own attendance, marks, fees, hall-ticket status, scholarships, placements, timetable, events, notifications, and library access. |
+| Faculty | Authorized attendance and marks entry, own timetable and availability, scholarship authoring, absence requests, and substitute-coverage responses. |
+| HOD | Department dashboard, scholarship review, fee-defaulter view, timetable configuration, draft generation, validation/review, locking, publication, and coverage review. |
+| Admin / Registrar | Admissions, institutional configuration, terms/periods/rooms, placements, events, parent/librarian account management, and library staff workflows. |
+| Librarian | Catalogue, reservations, physical pickup/return confirmation, issue records, fines, and library operations. |
+| Parent | Read-only views of an active, explicitly linked child’s dashboard, timetable, events, notifications, and library information. |
+| Principal | Institution dashboard and read-only timetable and department coverage views. |
+
+Timetables use versioned drafts with generation, validation/review, explicit publication, dated reschedules, and audit/operation history. Faculty coverage is a separate dated workflow: an accepted substitute assignment appears only on its occurrence date, not as a recurring weekly class.
+
+## System architecture
+
+~~~mermaid
 flowchart LR
-  UI[React + Vite] -->|REST /api| API[FastAPI]
-  API -->|SQLAlchemy / Psycopg| DB[(PostgreSQL source of truth)]
-  API --- AUTH[JWT and role authorization]
-  API --- EVENTS[In-app events and recipient-owned notifications]
+  UI[React + Vite frontend] -->|REST /api| API[FastAPI API]
+  API --> AUTH[JWT authentication and RBAC]
+  AUTH --> DOM[Role-scoped domain services and agents]
+  DOM --> DB[(PostgreSQL via SQLAlchemy/Psycopg)]
+  DOM --> BUS[In-app event bus and workflow/audit history]
+  BUS --> N[Recipient-owned notifications]
+  DOM -. eligible sanitized general query .-> AI[Optional Groq or Ollama]
   MIG[Alembic migrations] --> DB
-  DOCKER[Optional Docker Compose] -. deploys .-> UI
-  DOCKER -. deploys .-> API
-```
+~~~
 
-The backend also supports SQLite for isolated local/demo and test use. PostgreSQL schema changes are Alembic-managed. The optional academic assistant uses permission-checked, role-scoped tools with deterministic routing, an optional hosted Groq tier for sanitized general learning, and optional local Ollama fallback; it does not mutate records through chat.
+The backend has REST domain services for timetable, coverage, placement, library, events, and parent workflows. The optional AI provider is not required for deterministic record queries and is only consulted for permitted, bounded generative turns.
 
-## Implemented modules
+## How the multi-agent system works
 
-| Module | Current capability |
+Four registered components meet the project’s autonomous-agent criterion: they own policy/state beyond a single request and can react to events or scheduled scans.
+
+| Agent | Responsibility |
 |---|---|
-| Student portal | Personal dashboard for attendance, marks, fees, hall-ticket status, scholarships, placements, notifications, published timetable, events, and library access. |
-| Faculty, attendance and marks | Faculty marks attendance only for assigned subject/sections and enters validated internal marks for authorized sheets. |
-| Fees and clearance | Fee records, student payment action, collection/defaulter summaries, and fee-clearance inputs for exam eligibility; not an external payment gateway. |
-| Scholarships | Faculty creates/submits department scholarships; HOD reviews the workflow; students see applicable status. |
-| Exams and eligibility | Exam schedules, eligibility evaluation, and hall-ticket availability/status from institutional records. |
-| Timetable | Admin configures terms, periods, holidays and rooms. HOD configures demand, generates a versioned draft, validates/reviews it, locks entries, and explicitly publishes. Student/faculty views use published schedules. |
-| Placement Agent | Admin manages drives, eligibility using hard rules plus model/rules fallback, shortlists and outcomes. Student views expose eligibility/application state. Private drive PDFs are served through authenticated document links when present. |
-| Notification Agent | Recipient-owned notifications, unread count, and mark-one/mark-all-read actions. |
-| Campus events | Admin creates, edits, publishes, or cancels events with role/department visibility and in-app notifications. |
-| Parent portal | Admin-created accounts with explicitly linked, read-only child dashboard, timetable, event, notification, and library views; temporary passwords must change at first login. |
-| Library Agent | Catalogue, reservations/slips, librarian physical pickup/return confirmation, seven-day loans, ₹1/day overdue policy, recommendations, and parent summaries. |
-| Admissions/Admin | Admin verifies applications, runs merit, allots seats against intake, enrols applicants, and manages parent/librarian accounts. |
-| Academic assistant/orchestrator | Authenticated deterministic routing plus optional Groq/local generation for sanitized general-learning turns. |
+| Orchestrator | Classifies assistant requests, applies scope, selects approved read tools, and controls optional LLM escalation. |
+| Attendance | Validates attendance intake, recalculates summaries, detects shortages/streaks, and runs proactive scans. |
+| Eligibility | Evaluates hall-ticket eligibility and scholarship assessments from attendance and fee events. |
+| Timetable | Provides the legacy proposal-only solver; production timetable writes use the versioned timetable operations service. |
 
-## Roles
+The registry also exposes tool-backed domain components: Academic, Admission, Finance, Placement, Library, and Notification. They provide domain behavior and event subscriptions where applicable, but are not represented as autonomous agents in the project’s agent count.
 
-| Role | High-level access |
-|---|---|
-| Admin | Admissions, institutional configuration/analytics, placements/events, parent/librarian management, and library staff workflows. |
-| Student | Own academic, fee, exam, scholarship, placement, timetable, event, notification, and library information/actions. |
-| Faculty | Assigned attendance and marks, own timetable, scholarship authoring, and faculty dashboard. |
-| HOD | Department dashboard, scholarship review, fee-defaulter view, and department timetable configuration/generation/validation/publication. |
-| Principal | Institution dashboard and read-only timetable/department coverage. |
-| Parent | Read-only data for active, explicitly linked children; no impersonation or mutation controls. |
-| Librarian | Catalogue, reservations, pickups/returns, issue records, fines, and library operations. |
+Agents do not bypass API authorization and do not execute arbitrary SQL. Event flow is: API request → authorization and scope checks → deterministic domain service/agent → event/workflow record → response or recipient-owned notification.
 
-Parent and Librarian accounts are created by Admin; there is no public signup.
+## Orchestrator architecture
 
-## Workflows
+The orchestrator classifies intent with the deterministic lexicon first, applies authenticated role and department scope, and executes an allowlisted deterministic tool/service where possible. Only low-confidence, eligible cases may use the optional provider path. Provider failure degrades to the deterministic result. The orchestrator does not expose secrets, tokens, database URLs, private records, or unauthorized data.
 
-- Faculty attendance/marks update authorized institutional records that student and eligibility views read.
-- Fees, attendance, and configured checks contribute to exam eligibility and hall-ticket status; schedules are shown to students.
-- Faculty drafts/submits scholarships and HOD reviews them; students see the resulting status.
-- Admin creates placement drives, evaluates eligibility, then manages shortlists and outcomes.
-- Timetables follow configure → generate draft → validate/review → publish. Drafts never replace published views.
-- Admin publishes/cancels campus events for configured audiences; notifications are in-app recipient records.
-- Students reserve library copies and receive slips. Librarian/Admin confirms physical pickup/return; overdue fines use the configured policy.
+~~~mermaid
+sequenceDiagram
+  participant U as Authenticated user
+  participant O as Orchestrator
+  participant A as Authorization and scope checks
+  participant T as Allowlisted tool or domain agent
+  participant R as Safe response renderer
+  U->>O: Ask a question
+  O->>A: Identify intent and validate role/scope
+  A-->>O: Permitted tool set or denial
+  O->>T: Deterministic scoped read first
+  T-->>O: Authorized evidence
+  O->>R: Render safe role-scoped answer
+  R-->>U: Response without secrets or unauthorized data
+~~~
 
-## Local development
+## Timetable and coverage workflows
 
-### Prerequisites
+### Draft generation to publication
+
+1. An authorized HOD configures timetable inputs for a department and term.
+2. MAWOS generates a versioned draft and validates/reviews the proposal.
+3. Authorized users may lock eligible entries and explicitly publish a valid draft.
+4. Students and faculty read the published version; drafts do not replace it.
+
+### Faculty reschedule
+
+1. Faculty selects one of their published occurrences and requests a replacement-slot preview.
+2. The dated change is validated and requires authorized HOD review/confirmation.
+3. The confirmed change is retained as a dated occurrence change and audit event.
+
+### Faculty absence and substitute coverage
+
+1. Faculty creates and submits a dated absence request.
+2. An authorized HOD reviews it; coverage requests are created for affected published occurrences.
+3. The HOD reviews eligible candidates and proposes one substitute for a specific occurrence.
+4. The substitute accepts or declines. Acceptance creates a one-time substitute class for that exact date.
+
+A reschedule moves or changes a published occurrence through a dated timetable change. Coverage keeps the original occurrence and assigns substitute faculty for it; it is not a recurring assignment.
+
+## Technology stack
+
+- Frontend: React, Vite, React Router, Tailwind CSS, Lucide, Recharts, Vitest, Testing Library
+- Backend: Python, FastAPI, Pydantic, Uvicorn, SQLAlchemy, Psycopg 3, Alembic, PyJWT
+- Data/rules: PostgreSQL; optional SQLite for local/test use; scikit-learn, pandas, numpy, joblib
+- Operations: Docker Compose, Nginx unprivileged frontend image, health checks
+- Optional AI: Groq-compatible hosted provider or local Ollama, with deterministic fallback
+
+## Prerequisites
 
 - Git
-- Python 3.12 (the backend Docker image uses Python 3.12)
-- Node.js 22 and npm (the frontend Docker build uses Node 22)
+- Python 3.12
+- Node.js 22 and npm
 - PostgreSQL for PostgreSQL development
-- Docker Engine with the Compose plugin, optionally
+- Docker Engine with the Compose plugin for containerized development
 
-Linux/macOS:
+## Local setup
 
-```bash
+### 1. Clone and install
+
+~~~bash
 git clone https://github.com/Nikil245/MAWOS.git mawos
 cd mawos
 python3.12 -m venv .venv
@@ -94,211 +124,181 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 cd frontend && npm ci && cd ..
 cp .env.example .env
-```
+~~~
 
-Edit the ignored `.env` and generate a unique JWT secret locally. For an existing local PostgreSQL database:
+Edit the ignored <code>.env</code>; do not commit it. Use a database-owner/migration account for schema changes and a restricted application account at runtime.
 
-```env
+### 2. Configure PostgreSQL safely
+
+<code>MAWOS_DATABASE_MODE</code> is required and must be <code>external</code> or <code>docker</code>.
+
+- <code>external</code> uses an existing host PostgreSQL database. Native commands use loopback <code>MAWOS_DATABASE_URL</code>; Docker backend containers use <code>MAWOS_DOCKER_DATABASE_URL</code> with <code>host.docker.internal</code>.
+- <code>docker</code> is only for the isolated PostgreSQL service in [docker-compose.docker-db.yml](docker-compose.docker-db.yml). It uses a separate named volume and does not copy, reset, seed, or migrate a database automatically.
+
+~~~env
 MAWOS_ENV=development
 MAWOS_DATABASE_MODE=external
-MAWOS_DATABASE_URL=postgresql+psycopg://mawos_app:REPLACE_WITH_PASSWORD@127.0.0.1:5432/mawos
-MAWOS_DOCKER_DATABASE_URL=postgresql+psycopg://mawos_app:REPLACE_WITH_PASSWORD@host.docker.internal:5432/mawos
-MAWOS_JWT_SECRET=REPLACE_WITH_A_LONG_RANDOM_SECRET
-MAWOS_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173
+MAWOS_DATABASE_URL=postgresql+psycopg://APP_USER:APP_PASSWORD@127.0.0.1:5432/mawos
+MAWOS_DOCKER_DATABASE_URL=postgresql+psycopg://APP_USER:APP_PASSWORD@host.docker.internal:5432/mawos
+MAWOS_MIGRATION_DATABASE_URL=postgresql+psycopg://MIGRATION_OWNER:MIGRATION_PASSWORD@127.0.0.1:5432/mawos
+MAWOS_JWT_SECRET=GENERATE_A_LONG_RANDOM_SECRET
 MAWOS_SEED_DEMO_DATA=false
-MAWOS_AI_PROVIDER=auto
-GROQ_API_KEY=<YOUR_GROQ_API_KEY>
-MAWOS_GROQ_BASE_URL=https://api.groq.com/openai/v1
-MAWOS_GROQ_MODEL=openai/gpt-oss-20b
-MAWOS_GROQ_TIMEOUT_SECONDS=30
-MAWOS_GROQ_MAX_TOKENS=180
-MAWOS_GROQ_MAX_INPUT_CHARS=6000
-MAWOS_GROQ_HEALTH_TTL=30
-MAWOS_GROQ_RETRY_COOLDOWN=5
-MAWOS_AI_REQUESTS_PER_MINUTE=6
-```
+~~~
 
-Create the development database/roles through your PostgreSQL administration process. Use a database-owner/migration role for DDL and a restricted application role at runtime. MAWOS does not create PostgreSQL tables, seed PostgreSQL, reset a database, or generate timetables on startup.
+### 3. Run reviewed migrations
 
-`MAWOS_DATABASE_MODE=external` selects an existing host PostgreSQL database. Native processes use the loopback URL (`127.0.0.1`). `MAWOS_DATABASE_MODE=docker` is only for the isolated Compose PostgreSQL service. For Docker against an external host database, the container uses the separate `host.docker.internal` URL; do not replace the native loopback URL with it.
+<code>MAWOS_MIGRATION_DATABASE_URL</code> must use <code>postgresql+psycopg://</code>. Do not migrate an unknown or live database without reviewing the plan and taking a backup.
 
-Load configuration, migrate with migration-owner credentials, and start the API:
-
-```bash
+~~~bash
 set -a; source .env; set +a
 .venv/bin/alembic current
 .venv/bin/alembic upgrade head
+~~~
+
+FastAPI uses <code>MAWOS_DATABASE_URL</code>; the Docker entrypoint removes the migration URL before starting Uvicorn.
+
+### 4. Start without Docker
+
+~~~bash
 .venv/bin/python run.py
-```
+~~~
 
 In another terminal:
 
-```bash
+~~~bash
 cd mawos
 source .venv/bin/activate
 cd frontend
 npm run dev
-```
+~~~
 
 - Frontend: <http://127.0.0.1:5173>
-- API health/status: <http://127.0.0.1:8000/>
-- API docs: <http://127.0.0.1:8000/docs>
+- API status: <http://127.0.0.1:8000/>
+- API documentation: <http://127.0.0.1:8000/docs>
 
-Current project documentation provides Linux/macOS shell commands; no separate Windows setup is asserted here.
+### 5. Start with Docker Compose
 
-## Docker
+For an existing host database in external mode:
 
-Copy/configure `.env` first. Compose explicitly supplies
-`MAWOS_ENV=development` and disables startup migrations, so the restricted
-runtime account never needs DDL ownership. Apply reviewed migrations separately
-with `MAWOS_MIGRATION_DATABASE_URL`, using a database-owner account. Do not
-point either URL at an unknown/live database without reviewing the migration
-plan. Do not use `docker compose down -v` unless intentionally deleting local
-Docker volumes.
-
-### A. Existing external local PostgreSQL
-
-Set `MAWOS_DATABASE_MODE=external`, keep `MAWOS_DATABASE_URL` on `127.0.0.1`, and set `MAWOS_DOCKER_DATABASE_URL` to the `host.docker.internal` URL above.
-
-```bash
+~~~bash
 docker compose config --quiet
 docker compose build
 docker compose up -d
 docker compose ps
 docker compose logs -f backend frontend
-```
+~~~
 
-This starts frontend and backend. In `auto` mode, Groq is used only after a
-successful authenticated model-list check; otherwise MAWOS tries an available
-local Ollama instance and finally degrades to deterministic-only operation.
-The Groq key is passed only to the backend runtime, never to the frontend build.
-Groq lists the configurable default `openai/gpt-oss-20b` as a
-[production model](https://console.groq.com/docs/models), served through its
-[OpenAI-compatible endpoint](https://console.groq.com/docs/openai).
+Compose defaults <code>MAWOS_RUN_MIGRATIONS</code> to <code>false</code>; run reviewed migrations separately with the owner-capable migration URL.
 
-Start the optional local fallback explicitly:
+For a fresh isolated Docker PostgreSQL target, configure Docker database variables, then use the override:
 
-```bash
-docker compose --profile local-ai up -d
-docker compose --profile local-ai exec ollama ollama pull qwen2.5:3b
-```
-
-Ollama turns default to a 90-second deadline via
-`MAWOS_OLLAMA_TIMEOUT_SECONDS`; generated answers default to 160 tokens, and
-`MAWOS_OLLAMA_KEEP_ALIVE_SECONDS=300` keeps the model warm between normal
-requests without background polling. See `docs/DOCKER.md` for validated limits.
-
-Provider modes are `auto` (Groq → Ollama → deterministic-only), `groq`
-(Groq only), `ollama` (local only), and `disabled` (no generative calls).
-Only bounded general-learning text, sanitized title/author/category catalogue
-metadata, and aggregate-query text sent for strict intent classification can
-enter this layer. Aggregate results never return to the provider. Private
-records, live stock counts, borrower data, database access, SQL, JWTs, internal
-IDs, and credentials cannot. A per-user limit applies only to provider turns;
-deterministic record and catalogue searches do not consume it.
-
-### B. Fresh Docker PostgreSQL
-
-This is an isolated database, not a host-database copy. Set `MAWOS_DATABASE_MODE=docker`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` in `.env`; retain `MAWOS_DOCKER_DATABASE_URL` because the base Compose file requires it. Apply the reviewed migration chain explicitly before starting the restricted API runtime.
-
-```bash
+~~~bash
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml config --quiet
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml build
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml up -d postgres
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml up -d backend frontend
 docker compose -f docker-compose.yml -f docker-compose.docker-db.yml ps
-```
+~~~
 
-The persistent volume starts empty. Existing legacy databases already stamped at the former baseline remain compatible: Alembic does not rerun the new initial revision for a database at that revision or later. Docker-mode database URLs are private to its network.
+Docker Compose exposes the frontend at <http://localhost:3000>, API status at <http://localhost:8000/>, and API documentation at <http://localhost:8000/docs>. Stop services with <code>docker compose down</code>; do not use <code>docker compose down -v</code> unless intentionally deleting local volumes.
 
-Docker URLs: <http://localhost:3000>, <http://localhost:8000/>, and <http://localhost:8000/docs>.
+## Environment variables
 
-## Migrations
+Copy [.env.example](.env.example) and replace placeholders in ignored <code>.env</code>. The template lists all optional provider and library-policy settings.
 
-Before a live migration, back up and verify the target database. Run Alembic as a database owner/migration role, not the runtime app role:
+| Variable | Purpose | Placeholder example |
+|---|---|---|
+| <code>MAWOS_ENV</code> | Required deployment mode. | <code>development</code> |
+| <code>MAWOS_DATABASE_MODE</code> | Required database target selection. | <code>external</code> |
+| <code>MAWOS_DATABASE_URL</code> | Native/runtime database URL. | <code>postgresql+psycopg://APP_USER:APP_PASSWORD@HOST:5432/mawos</code> |
+| <code>MAWOS_DOCKER_DATABASE_URL</code> | Database URL passed to backend containers in external mode. | <code>postgresql+psycopg://APP_USER:APP_PASSWORD@host.docker.internal:5432/mawos</code> |
+| <code>MAWOS_MIGRATION_DATABASE_URL</code> | Alembic-only owner-capable database URL. | <code>postgresql+psycopg://MIGRATION_OWNER:MIGRATION_PASSWORD@HOST:5432/mawos</code> |
+| <code>MAWOS_RUN_MIGRATIONS</code> | Docker entrypoint migration policy. | <code>false</code> |
+| <code>MAWOS_JWT_SECRET</code> | JWT signing secret. | <code>GENERATE_A_LONG_RANDOM_SECRET</code> |
+| <code>MAWOS_CORS_ORIGINS</code> | Explicit browser origins allowed to call the API. | <code>https://frontend.example.edu</code> |
+| <code>MAWOS_SEED_DEMO_DATA</code> | Enables SQLite demo seeding outside production only. | <code>false</code> |
+| <code>VITE_API_BASE_URL</code> | API base embedded into the frontend build. | <code>/api</code> |
+| <code>MAWOS_AI_PROVIDER</code> | Optional provider policy: auto, groq, ollama, disabled. | <code>disabled</code> |
+| <code>GROQ_API_KEY</code> | Optional server-only hosted-provider key. | <code>YOUR_PROVIDER_KEY</code> |
+| <code>MAWOS_OLLAMA_HOST</code> | Optional native Ollama endpoint. | <code>http://127.0.0.1:11434</code> |
+| <code>POSTGRES_DB</code>, <code>POSTGRES_USER</code>, <code>POSTGRES_PASSWORD</code> | Isolated Docker PostgreSQL only. | <code>REPLACE_WITH_VALUE</code> |
 
-```bash
-set -a; source .env; set +a
-MAWOS_MIGRATION_DATABASE_URL='postgresql+psycopg://MIGRATION_OWNER:PASSWORD@127.0.0.1:5432/mawos' \
-  .venv/bin/alembic current
-MAWOS_MIGRATION_DATABASE_URL='postgresql+psycopg://MIGRATION_OWNER:PASSWORD@127.0.0.1:5432/mawos' \
-  .venv/bin/alembic upgrade head
-```
+Never give a server secret a <code>VITE_</code> prefix. Production rejects insecure JWT settings and wildcard/unqualified CORS configuration.
 
-Use `head`, not an old hardcoded revision. The runtime role should not need DDL privileges. No reset or seed occurs automatically. For a known existing schema, review the baseline procedure before deliberately using `alembic stamp head`; stamping records a revision without applying DDL.
-
-## Render deployment
-
-Deploy backend and frontend as separate Docker services, each with Render's
-injected `PORT`; the images bind it automatically. Set backend variables:
-
-```env
-MAWOS_ENV=production
-MAWOS_DATABASE_MODE=external
-MAWOS_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:5432/mawos
-MAWOS_MIGRATION_DATABASE_URL=postgresql+psycopg://MIGRATION_OWNER:PASSWORD@HOST:5432/mawos
-MAWOS_JWT_SECRET=GENERATE_A_RANDOM_SECRET_OF_AT_LEAST_32_BYTES
-MAWOS_CORS_ORIGINS=https://YOUR-FRONTEND.onrender.com
-MAWOS_AI_PROVIDER=disabled
-```
-
-Set the frontend build variable `VITE_API_BASE_URL=https://YOUR-BACKEND.onrender.com/api`.
-Leave Render's **Docker Command** field blank. In production, the image
-entrypoint's `MAWOS_RUN_MIGRATIONS=auto` mode runs `alembic upgrade head` with
-the migration-owner URL, removes that URL, then starts Uvicorn using the
-restricted runtime URL and Render's injected `PORT`. Set
-`MAWOS_RUN_MIGRATIONS=false` only when migrations are an explicitly authorized
-separate deployment step.
-
-## Testing and quality checks
+## Testing and validation
 
 From the repository root:
 
-```bash
+~~~bash
 .venv/bin/python -m pytest -q
 cd frontend && npm test
 cd frontend && npm run build
 cd .. && .venv/bin/python -m pip check
 docker compose config --quiet
+docker compose ps
 git diff --check
-```
+~~~
 
-PostgreSQL tests are opt-in. `MAWOS_POSTGRES_TEST_URL` must target isolated `mawos_test`, never live `mawos`:
+Migration status and application:
 
-```bash
+~~~bash
+set -a; source .env; set +a
+.venv/bin/alembic current
+.venv/bin/alembic upgrade head
+~~~
+
+PostgreSQL tests are opt-in and must target an isolated test database, never the live <code>mawos</code> database:
+
+~~~bash
 export MAWOS_POSTGRES_TEST_URL='postgresql+psycopg://TEST_USER:TEST_PASSWORD@127.0.0.1:5432/mawos_test'
 .venv/bin/python -m pytest tests/test_library_postgresql.py -q -rs
-```
+~~~
 
-## Operational notes
+Use <code>docker compose ps</code> to inspect health. Backend checks <code>/</code>; frontend checks its local Nginx root; the optional PostgreSQL override uses <code>pg_isready</code>.
 
-- Admin creates Parent accounts and active child links in parent management. The temporary password is returned once and must be changed before protected use.
-- Admin creates Librarian accounts in librarian management. Their temporary password is also returned once and subject to the first-login password-change gate.
-- Notifications are in-app records addressed to one recipient. Users can list their own records, see unread count, and mark one/all read.
-- Library reservation expiry is operator-scheduled, not a FastAPI startup job:
+## Deployment notes
 
-  ```bash
-  .venv/bin/python -m backend.app.library.maintenance --batch-size 200
-  docker compose run --rm --no-deps backend python -m backend.app.library.maintenance --batch-size 200
-  ```
+Deploy backend and frontend as separate Render Docker services; both images use Render’s injected <code>PORT</code>. Configure <code>MAWOS_ENV=production</code>, <code>MAWOS_DATABASE_MODE=external</code>, a restricted runtime database URL, explicit HTTPS CORS origins, and a strong JWT secret. Set <code>VITE_API_BASE_URL</code> to the browser-reachable backend <code>/api</code> URL.
 
-## Documentation
+Use an owner-capable account only for <code>MAWOS_MIGRATION_DATABASE_URL</code>, using <code>postgresql+psycopg://</code>. In production, <code>MAWOS_RUN_MIGRATIONS=auto</code> runs <code>alembic upgrade head</code>, removes the migration URL from the runtime environment, then starts Uvicorn with the runtime URL. Set it to <code>false</code> only for an explicitly authorized separate migration step. Leave Render’s Docker Command blank so the image entrypoint remains in control.
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Docker deployment](docs/DOCKER.md)
-- [Timetable workflow](docs/TIMETABLE.md)
-- [Placement workflow](docs/PLACEMENTS.md)
-- [Library Agent](docs/LIBRARY.md)
-- [Parent Portal](docs/PARENT_PORTAL.md)
-- [Assistant notes](docs/ASSISTANT_PHASE3.md)
-- [Timetable verification](docs/TIMETABLE_VERIFICATION.md)
+## Security and data handling
 
-## Current limitations and future scope
+- JWT bearer authentication and RBAC protect API routes.
+- Faculty, student, parent, and department views apply identity and department scope; parents are read-only and require explicit active links.
+- Timetable operations, coverage workflows, and notifications retain workflow/audit context.
+- Secrets, database URLs, provider keys, and JWT values belong in environment variables, never committed files or frontend build variables.
+- The assistant uses allowlisted, scope-checked reads and does not provide arbitrary SQL or operational mutation through chat.
+- PostgreSQL runtime roles should not require DDL privileges; use a separate migration owner for schema changes.
+
+## Repository structure
+
+~~~text
+backend/        FastAPI application, domain services, agents, and Docker entrypoint
+frontend/       React/Vite application, UI tests, and Nginx configuration
+alembic/        Alembic migration environment and revisions
+tests/          Backend test suite
+docs/           Architecture and operational documentation
+evaluation/     Evaluation tooling, fixtures, and recorded results
+ml/             Model training, calibration, and data utilities
+scripts/        Operational/import/verification scripts
+data/           Project data assets
+~~~
+
+Useful references: [architecture](docs/ARCHITECTURE.md), [Docker deployment](docs/DOCKER.md), [timetable workflow](docs/TIMETABLE.md), [placement workflow](docs/PLACEMENTS.md), [library workflow](docs/LIBRARY.md), [parent portal](docs/PARENT_PORTAL.md), and [assistant notes](docs/ASSISTANT_PHASE3.md).
+
+## Troubleshooting
+
+| Problem | Checks |
+|---|---|
+| Docker service is unhealthy | Run <code>docker compose ps</code>, then <code>docker compose logs -f backend frontend</code>. Confirm backend <code>/</code> and frontend Nginx root are reachable. |
+| Migration configuration | Load <code>.env</code>, verify <code>MAWOS_DATABASE_MODE</code>, and use an owner-capable <code>MAWOS_MIGRATION_DATABASE_URL</code> with <code>postgresql+psycopg://</code>. Run <code>alembic current</code> before <code>upgrade head</code>. |
+| PostgreSQL connection issue | Confirm PostgreSQL is running, URL/driver are correct, and host/Docker connectivity matches the mode. External Docker mode needs <code>host.docker.internal</code>; native tools use loopback. |
+| Frontend cannot reach backend | For Vite, start the API on <code>127.0.0.1:8000</code>. For containers, keep <code>VITE_API_BASE_URL=/api</code> unless using a browser-reachable separately hosted API; then rebuild the frontend and configure explicit CORS origins. |
+
+## Current limitations
 
 - Notifications are in-app only; email, SMS, and WhatsApp delivery are not implemented.
-- No public parent registration, OTP, SMS login, or invitation flow.
-- No payment gateway, QR/barcode event attendance, or external calendar sync.
-- No Redis distributed event bus/cache.
-- Library fines are for in-person collection, not online payment.
-- The assistant is role-scoped/tool-backed; Groq and Ollama are optional, and deterministic record answers require neither.
-- PostgreSQL tests need an explicit isolated `MAWOS_POSTGRES_TEST_URL`.
+- No public parent registration, OTP/SMS login, payment gateway, external calendar sync, or Redis distributed event bus/cache.
+- Library fines represent in-person collection, not online payment.
+- The optional provider layer can be disabled without affecting deterministic record and catalogue reads.
