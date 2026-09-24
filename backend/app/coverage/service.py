@@ -24,6 +24,24 @@ def business_today() -> dt.date:
     return dt.datetime.now(TZ).date()
 
 
+def occurrence_has_passed(date: dt.date, ends_at: dt.time | None) -> bool:
+    """Whether a dated class is over in the institution's business timezone."""
+    today = business_today()
+    if date < today:
+        return True
+    if date > today:
+        return False
+    # A missing historical period must not make a stale proposal actionable.
+    if ends_at is None:
+        return True
+    return dt.datetime.now(TZ) >= dt.datetime.combine(date, ends_at, TZ)
+
+
+def assignment_has_passed(db, row: CoverageAssignment) -> bool:
+    period = db.get(tm.PeriodDefinition, row.period_id)
+    return occurrence_has_passed(row.occurrence_date, period.ends_at if period else None)
+
+
 def fail(status: int, message: str):
     raise HTTPException(status, message)
 
@@ -212,7 +230,12 @@ def create_absence(db, user, body) -> tuple[dict, list[tuple[str, dict]]]:
                          **body.model_dump())
     db.add(row); db.flush()
     audit(db, user, "faculty.absence_created", absence=row, to_status="DRAFT")
-    return absence_record(db, row, private=True), []
+    # Drafting leave is valid even if it has no class to cover.  Return an
+    # explicit, non-error hint so callers do not mistake that normal case for
+    # a missing timetable occurrence.
+    result = absence_record(db, row, private=True)
+    result["scheduled_occurrence_count"] = len(affected_occurrences(db, row))
+    return result, []
 
 
 def own_absences(db, user) -> list[dict]:
@@ -436,6 +459,8 @@ def coverage_queue(db, user, *, escalated=False) -> list[dict]:
             # A superseded timetable version is not actionable. GET remains
             # read-only; an authorized cancellation action retains history.
             continue
+        if occurrence_has_passed(item["date"], item["end_time"]):
+            continue
         accepted = db.query(CoverageAssignment).filter_by(
             coverage_request_id=row.id, status="ACCEPTED").one_or_none()
         assignment = {}
@@ -479,6 +504,8 @@ def candidates(db, user, request_id: int, *, mutate_status=True) -> list[dict]:
     if request.status in {"DECLINED", "UNFILLED", "CANCELLED"}:
         fail(409, "This coverage request is closed.")
     item = occurrence(db, request.timetable_entry_id, request.occurrence_date)
+    if occurrence_has_passed(item["date"], item["end_time"]):
+        fail(409, "This coverage occurrence has expired.")
     faculty_rows = (db.query(Faculty).join(User, User.faculty_id == Faculty.id)
                     .filter(Faculty.dept_code == item["dept"], Faculty.id != original.id,
                             User.role.in_(("faculty", "hod"))).distinct().order_by(
@@ -549,6 +576,9 @@ def approve_candidate(db, user, request_id: int, faculty_id: int) -> tuple[dict,
         fail(403, "You cannot approve your own coverage assignment.")
     if request.status in {"DECLINED", "UNFILLED", "CANCELLED"}:
         fail(409, "This coverage request is closed.")
+    item = occurrence(db, request.timetable_entry_id, request.occurrence_date)
+    if occurrence_has_passed(item["date"], item["end_time"]):
+        fail(409, "This coverage occurrence has expired.")
     eligible = {row["faculty_id"]: row for row in candidates(db, user, request_id, mutate_status=False)}
     if faculty_id not in eligible:
         fail(409, "The selected faculty member is not an eligible substitute.")
@@ -560,7 +590,7 @@ def approve_candidate(db, user, request_id: int, faculty_id: int) -> tuple[dict,
     assignment = CoverageAssignment(
         coverage_request_id=request.id, substitute_faculty_id=faculty_id,
         timetable_entry_id=request.timetable_entry_id,
-        period_id=occurrence(db, request.timetable_entry_id, request.occurrence_date)["period"].id,
+        period_id=item["period"].id,
         occurrence_date=request.occurrence_date, status="PROPOSED")
     db.add(assignment); db.flush()
     old = request.status; request.status = "APPROVED"; request.approved_by = user.id
@@ -644,7 +674,9 @@ def my_assignments(db, user) -> list[dict]:
             CoverageAssignment.occurrence_date.desc()).all()
     result = []
     for row in rows:
-        result.append({"id": row.id, "status": row.status,
+        expired = row.status == "PROPOSED" and assignment_has_passed(db, row)
+        result.append({"id": row.id, "status": "EXPIRED" if expired else row.status,
+                       "expired": expired,
                        **stored_occurrence_record(db, row.timetable_entry_id,
                                                   row.occurrence_date)})
     return result
@@ -680,6 +712,8 @@ def respond_assignment(db, user, assignment_id: int, accept: bool) -> tuple[dict
         id=assignment_id, substitute_faculty_id=user.faculty_id).with_for_update().one_or_none()
     if row is None:
         fail(404, "Coverage assignment not found.")
+    if assignment_has_passed(db, row):
+        fail(409, "This coverage occurrence has expired and can no longer be accepted or declined.")
     if row.status != "PROPOSED":
         fail(409, "This coverage proposal has already been resolved.")
     request = db.query(CoverageRequest).filter_by(id=row.coverage_request_id).with_for_update().one()

@@ -41,6 +41,39 @@ describe('faculty absence and runtime coverage UI', () => {
     expect(screen.getByRole('button', { name: 'Create draft' })).toHaveClass('min-h-11');
   });
 
+  it('refreshes accepted coverage immediately so it is no longer actionable', async () => {
+    const proposed = { id: 19, status: 'PROPOSED', occurrence_id: 31, date: '2030-01-07',
+      department: 'AIML', year: 3, section: 'A', subject_code: '23AI51',
+      start_time: '09:00:00', end_time: '10:00:00' };
+    api.facultyCoverageAssignments.mockResolvedValueOnce([proposed]).mockResolvedValueOnce([
+      { ...proposed, status: 'ACCEPTED' },
+    ]);
+    api.facultyCoverageResponse.mockResolvedValue({ id: 19, status: 'ACCEPTED' });
+    render(<FacultyCoverage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+    expect(await screen.findByText('ACCEPTED')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Decline' })).not.toBeInTheDocument();
+    expect(api.facultyCoverageAssignments).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows an expired proposal as non-actionable', async () => {
+    api.facultyCoverageAssignments.mockResolvedValue([{ id: 20, status: 'EXPIRED', expired: true,
+      occurrence_id: 31, date: '2026-09-21', department: 'AIML', year: 3, section: 'A',
+      subject_code: '23AI51', start_time: '09:00:00', end_time: '10:00:00' }]);
+    render(<FacultyCoverage />);
+    expect(await screen.findByText('EXPIRED')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Decline' })).not.toBeInTheDocument();
+  });
+
+  it('explains that a no-class absence date needs no coverage', async () => {
+    api.createFacultyAbsence.mockResolvedValue({ id: 21, status: 'DRAFT', scheduled_occurrence_count: 0 });
+    render(<FacultyCoverage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Create draft' }));
+    expect(await screen.findByText(/No scheduled classes require coverage on this date/)).toBeInTheDocument();
+  });
+
   it('loads only backend-eligible candidates and proposes the selected one', async () => {
     api.coverageRequestQueue.mockResolvedValue([{ id: 8, status: 'CANDIDATES_AVAILABLE',
       subject_code: '23AI51', department: 'AIML', year: 3, section: 'A',

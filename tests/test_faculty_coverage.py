@@ -395,6 +395,46 @@ def test_accepted_coverage_is_final_in_hod_queue_and_substitute_timetable(covera
     assert response.status_code == 409
 
 
+def test_expired_proposals_are_read_only_and_cannot_be_assigned_or_responded_to(coverage_world, monkeypatch):
+    world = coverage_world; db = world["db"]; hod = world["users"]["Department HOD"]
+    substitute = world["users"]["Eligible"]; request = _approved_request(world)
+    proposal, _ = service.approve_candidate(db, hod, request.id, substitute.faculty_id)
+    db.commit()
+
+    monkeypatch.setattr(service, "business_today", lambda: world["today"] + dt.timedelta(days=1))
+    listed = service.my_assignments(db, substitute)
+    assert [(row["id"], row["status"], row["expired"]) for row in listed] == [
+        (proposal["assignment_id"], "EXPIRED", True)]
+    for accept in (True, False):
+        with pytest.raises(HTTPException, match="occurrence has expired") as error:
+            service.respond_assignment(db, substitute, proposal["assignment_id"], accept)
+        assert error.value.status_code == 409
+    with pytest.raises(HTTPException, match="occurrence has expired") as error:
+        service.approve_candidate(db, hod, request.id, substitute.faculty_id)
+    assert error.value.status_code == 409
+    assert db.get(CoverageAssignment, proposal["assignment_id"]).status == "PROPOSED"
+
+
+def test_second_accept_is_rejected_without_changing_the_accepted_assignment(coverage_world):
+    world = coverage_world; db = world["db"]; hod = world["users"]["Department HOD"]
+    substitute = world["users"]["Eligible"]; request = _approved_request(world)
+    proposal, _ = service.approve_candidate(db, hod, request.id, substitute.faculty_id)
+    accepted, _ = service.respond_assignment(db, substitute, proposal["assignment_id"], True)
+    with pytest.raises(HTTPException, match="already been resolved") as error:
+        service.respond_assignment(db, substitute, proposal["assignment_id"], True)
+    assert error.value.status_code == 409
+    assert db.get(CoverageAssignment, proposal["assignment_id"]).status == accepted["status"] == "ACCEPTED"
+
+
+def test_absence_draft_without_a_published_class_returns_a_clear_non_error_hint(coverage_world):
+    world = coverage_world
+    draft, _ = service.create_absence(world["db"], world["users"]["Original"], AbsenceCreate(
+        starts_on=world["today"] + dt.timedelta(days=1),
+        ends_on=world["today"] + dt.timedelta(days=1), reason_category="PERSONAL"))
+    assert draft["status"] == "DRAFT"
+    assert draft["scheduled_occurrence_count"] == 0
+
+
 def test_personal_timetable_exposes_accepted_coverage_as_a_dated_entry(coverage_world):
     world = coverage_world; db = world["db"]; hod = world["users"]["Department HOD"]
     substitute = world["users"]["Eligible"]; request = _approved_request(world)
